@@ -21,7 +21,10 @@
 ## 启动
 
 ```bash
-# 依赖已安装在 node_modules
+# 首次部署
+npm install
+
+# 直接运行
 node server.js
 
 # 或使用启动脚本（后台）
@@ -30,6 +33,8 @@ node server.js
 # 停止
 ./stop.sh
 ```
+
+`bin/mihomo` 不纳入 Git（体积大且区分架构），首次部署请按 `bin/README.md` 下载，或设置 `MIHOMO_BIN`。没有它时面板仍可启动，但站点检测和 CN 实际检测不可用。
 
 默认监听 `0.0.0.0:8888`，打开 `http://<主机IP>:8888`。
 
