@@ -1,0 +1,19 @@
+{
+  "name": "subflux",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SubFlux — 轻量订阅汇聚、节点画像与多客户端订阅生成",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "undici": "^8.12.4",
+    "yaml": "^2.9.1"
+  }
+}

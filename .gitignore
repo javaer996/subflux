@@ -1,0 +1,13 @@
+node_modules/
+data/
+.tools/
+server.log
+.subflux.pid
+*.tmp
+.validate/
+bin/mihomo
+bin/mihomo-*
+bin/*.gz
+*.pid
+.env
+.DS_Store

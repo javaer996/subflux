@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080c13">
+  <meta name="description" content="SubFlux 订阅汇聚：聚合订阅、定时刷新、IP 画像、按质量筛选并生成 Clash / Sing-box / Base64 订阅。">
+  <title>SubFlux · 订阅汇聚</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true">
+    <div class="ambient-orb orb-a"></div>
+    <div class="ambient-orb orb-b"></div>
+    <div class="ambient-grid"></div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#/overview" aria-label="SubFlux 首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none">
+            <path d="M9 14.5c3.6-5 10.3-6.6 15.4-3.6 2.8 1.7 4.5 4.4 5.1 7.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+            <path d="M31 25.5c-3.6 5-10.3 6.6-15.4 3.6-2.8-1.7-4.5-4.4-5.1-7.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity=".55"/>
+            <circle cx="30.8" cy="12.4" r="3.2" fill="currentColor"/>
+            <circle cx="9.2" cy="27.6" r="3.2" fill="currentColor" opacity=".65"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <strong>SubFlux</strong>
+          <small>订阅汇聚</small>
+        </span>
+      </a>
+
+      <div class="nav-group">
+        <span class="nav-label">工作台</span>
+        <nav class="nav" aria-label="主导航">
+          <a href="#/overview" data-nav="overview" class="nav-item">
+            <span class="nav-icon" data-icon="grid"></span><span>概览</span>
+          </a>
+          <a href="#/sources" data-nav="sources" class="nav-item">
+            <span class="nav-icon" data-icon="rss"></span><span>订阅源</span><span class="nav-badge" id="nav-badge-sources">0</span>
+          </a>
+          <a href="#/nodes" data-nav="nodes" class="nav-item">
+            <span class="nav-icon" data-icon="nodes"></span><span>节点池</span><span class="nav-badge" id="nav-badge-nodes">0</span>
+          </a>
+          <a href="#/profiles" data-nav="profiles" class="nav-item">
+            <span class="nav-icon" data-icon="layers"></span><span>输出订阅</span><span class="nav-badge" id="nav-badge-profiles">0</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-label">系统</span>
+        <nav class="nav" aria-label="系统导航">
+          <a href="#/settings" data-nav="settings" class="nav-item">
+            <span class="nav-icon" data-icon="settings"></span><span>设置与说明</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="sidebar-foot">
+        <div class="health-line">
+          <span class="status-dot" id="side-status-dot"></span>
+          <span id="side-status-text">正在连接</span>
+        </div>
+        <div class="sidebar-meta">
+          <span>v1.0.0</span>
+          <span id="side-memory">—</span>
+        </div>
+        <div class="sidebar-tip">绑定 0.0.0.0:8888</div>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" id="sidebar-scrim" data-action="toggle-sidebar" aria-hidden="true"></div>
+
+    <div class="main-wrap">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn mobile-menu" id="menu-btn" data-action="toggle-sidebar" aria-label="打开菜单">
+            <span data-icon="menu"></span>
+          </button>
+          <div class="crumb">
+            <span class="crumb-root">SubFlux</span>
+            <span class="crumb-sep">/</span>
+            <span id="page-title">概览</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="top-status" id="top-status">
+            <span class="status-dot is-loading"></span>
+            <span>连接中</span>
+          </div>
+          <button class="btn btn-ghost btn-sm top-refresh" id="top-refresh" data-action="refresh-all">
+            <span data-icon="refresh"></span><span class="top-refresh-label">刷新全部</span>
+          </button>
+          <button class="btn btn-primary btn-sm top-add" data-action="add-source">
+            <span data-icon="plus"></span><span class="top-add-label">添加订阅</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="app" class="app-main" tabindex="-1">
+        <div class="boot-screen">
+          <div class="boot-mark"><span></span><span></span><span></span></div>
+          <p>正在载入订阅池…</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="drawer-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <template id="icon-template"></template>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
