@@ -59,7 +59,7 @@ docker compose run --rm sources   # 重新拉取 GitHub 代码
 docker compose restart probe      # 重启；无依赖要装，Mihomo 直接复用
 ```
 
-GitHub 下载慢时设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com`，或 `MIHOMO_URL` 给完整 `.gz` 直链。
+Mihomo 按容器架构自动下载。国内机器如果下不动，设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com`；`MIHOMO_URL` 给完整 `.gz` 直链时优先级最高。
 
 ## 裸机运行
 

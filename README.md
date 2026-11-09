@@ -80,7 +80,9 @@ docker compose restart app         # 重启加载新代码；依赖与 Mihomo �
 
 也可以直接 `docker compose up -d`：它会重新跑一遍 `sources` 同步代码，但 `app` 已在运行不会自动重启，之后仍需 `docker compose restart app`。
 
-`REPO_URL` 可以换成自己的 fork；私有仓库用 `https://<token>@github.com/...` 或把 SSH key 挂进 `sources`。GitHub 下载 Mihomo 慢时设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com` 或直接给 `MIHOMO_URL` 完整 `.gz` 直链。
+`REPO_URL` 可以换成自己的 fork；私有仓库用 `https://<token>@github.com/...` 或把 SSH key 挂进 `sources`。
+
+Mihomo 默认按容器架构从 GitHub Releases 下载（`amd64-compatible` / `arm64`），服务器在国外时 `.env` 里 **`MIHOMO_URL` 和 `MIHOMO_MIRROR` 都留空即可**，不用填。只有国内网络下载不动时才需要：`MIHOMO_MIRROR=https://ghfast.top/https://github.com`（镜像前缀），或 `MIHOMO_URL` 给完整 `.gz` 直链（优先级最高，填了就完全绕过拼接）。
 
 没装 Docker 时也可以裸机跑，见 `overseas-server/README.md`；国内探针的容器部署见 `china-probe/README.md`。
 

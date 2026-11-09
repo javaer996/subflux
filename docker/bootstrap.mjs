@@ -93,7 +93,9 @@ function releaseUrl() {
   if (!arch) throw new Error(`不支持的架构：${os.arch()}，请用 MIHOMO_URL 指定二进制地址`);
   const file = `mihomo-linux-${arch}-v${MIHOMO_VERSION}.gz`;
   const base = `https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${file}`;
-  return MIHOMO_MIRROR ? `${MIHOMO_MIRROR.replace(/\/+$/, '')}/${base}` : base;
+  // 镜像前缀：既接受 https://ghfast.top，也接受 https://ghfast.top/https://github.com
+  const mirror = MIHOMO_MIRROR.replace(/\/+$/, '').replace(/\/https?:\/\/(www\.)?github\.com$/, '');
+  return mirror ? `${mirror}/${base}` : base;
 }
 
 async function downloadMihomo(target, url) {
