@@ -267,8 +267,13 @@ function prettyUrl(url) {
   }
 }
 
+function subBase() {
+  const configured = String(App.state?.settings?.subBaseUrl || '').trim().replace(/\/+$/, '');
+  return configured || location.origin;
+}
+
 function subUrl(profile, format = null) {
-  return `${location.origin}/sub/${profile.token}${format ? `/${format}` : ''}`;
+  return `${subBase()}/sub/${profile.token}${format ? `/${format}` : ''}`;
 }
 
 function debounce(fn, wait) {
@@ -2269,6 +2274,15 @@ function renderSettings() {
       <div class="settings-grid">
         <form id="settings-form" class="stack" autocomplete="off">
           <div class="card settings-section">
+            <h2>订阅访问地址</h2>
+            <div class="desc">生成订阅链接和二维码时使用的地址前缀，可以填别的域名或公网 IP，不必是面板当前的访问地址。</div>
+            <div class="field">
+              <label for="setting-sub-base">地址前缀</label>
+              <input class="input" id="setting-sub-base" name="subBaseUrl" value="${esc(s.subBaseUrl || '')}" placeholder="https://sub.example.com">
+              <div class="field-hint">留空则使用当前页面地址。可以带路径前缀，例如 https://example.com/subflux；结尾的 / 会自动去掉。</div>
+            </div>
+          </div>
+          <div class="card settings-section">
             <h2>刷新与检测</h2>
             <div class="desc">控制订阅抓取节奏、IP 情报缓存与网络超时。默认值偏向低资源占用。</div>
             <div class="form-stack">
@@ -2594,6 +2608,7 @@ function bindSettings() {
       excludeDepleted: fd.get('excludeDepleted') === 'on',
       siteCheckLimit: Number(fd.get('siteCheckLimit')) || 30,
       mihomoPath: String(fd.get('mihomoPath') || '').trim(),
+      subBaseUrl: String(fd.get('subBaseUrl') || '').trim(),
       sites,
       routing: {
         domesticDirect: fd.get('domesticDirect') === 'on',

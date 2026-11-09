@@ -130,6 +130,7 @@ http://<host>:8888/sub/<token>/plain
 - **协议**：SS / SSR / VMess / VLESS / Trojan / Hysteria2 / TUIC / HTTP / SOCKS5 / AnyTLS。
 - **客户端识别**：按 User-Agent 返回对应格式，也可用路径强制格式。
 - **扫码添加**：自动 / Clash / Sing-box / Base64 二维码。
+- **订阅地址前缀**：可在设置里填其它域名或公网 IP，订阅链接和二维码不必使用面板的访问地址。
 - **刷新后自动检测**：自动补 IP 画像、TCP 入口延迟和站点解锁；UDP 节点由站点检测补实际连通。
 - **拉取代理**：每个订阅源可选直连、走节点池中的某个节点（Mihomo 临时单节点出口），或指定 HTTP / HTTPS / SOCKS5 外部代理。
 - **流量识别**：读取 `Subscription-Userinfo`；流量耗尽或过期时可自动剔除。

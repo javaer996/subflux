@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS = {
   chinaProbeTimeoutMs: 5000,
   siteCheckLimit: 30,
   mihomoPath: '',
+  subBaseUrl: '',
   sites: DEFAULT_SITES.map((s) => ({ ...s })),
   routing: { ...DEFAULT_ROUTING },
 };
@@ -148,6 +149,7 @@ export class Store extends EventEmitter {
     state.settings.sites = normalizeSites(data.settings?.sites);
     state.settings.siteCheckLimit = clamp(Number.parseInt(data.settings?.siteCheckLimit, 10) || 30, 5, 200);
     state.settings.mihomoPath = cleanText(data.settings?.mihomoPath, 500);
+  state.settings.subBaseUrl = cleanText(data.settings?.subBaseUrl, 500).replace(/\/+$/, '');
     // Repair profile filter/group shapes from older snapshots.
     state.profiles = state.profiles.map((p) => {
       const profile = {

@@ -538,7 +538,9 @@ async function handleApi(req, res, url) {
     const format = requested === 'auto' ? '' : normalizeFormat(requested);
     const host = String(req.headers['x-forwarded-host'] || req.headers.host || `127.0.0.1:${PORT}`).split(',')[0].trim();
     const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
-    const link = `${proto}://${host}/sub/${profile.token}${format ? `/${format}` : ''}`;
+    const configuredBase = String(store.state.settings.subBaseUrl || '').trim().replace(/\/+$/, '');
+    const base = configuredBase || `${proto}://${host}`;
+    const link = `${base}/sub/${profile.token}${format ? `/${format}` : ''}`;
     try {
       const svg = await QRCode.toString(link, {
         type: 'svg',
@@ -671,6 +673,16 @@ async function handleApi(req, res, url) {
     }
     if (body.chinaProbeTimeoutMs !== undefined) s.chinaProbeTimeoutMs = safeInt(body.chinaProbeTimeoutMs, s.chinaProbeTimeoutMs, 1000, 15000);
     if (body.siteCheckLimit !== undefined) s.siteCheckLimit = safeInt(body.siteCheckLimit, s.siteCheckLimit, 5, 200);
+    if (body.subBaseUrl !== undefined) {
+      const value = String(body.subBaseUrl || '').trim().replace(/\/+$/, '');
+      if (value) {
+        let parsed;
+        try { parsed = new URL(value); } catch { return apiError(res, 400, '订阅访问前缀需要是完整 URL，例如 https://sub.example.com'); }
+        if (!/^https?:$/.test(parsed.protocol)) return apiError(res, 400, '订阅访问前缀需要以 http:// 或 https:// 开头');
+        if (parsed.search || parsed.hash) return apiError(res, 400, '订阅访问前缀不能带查询参数或 # 片段');
+      }
+      s.subBaseUrl = value.slice(0, 500);
+    }
     if (body.mihomoPath !== undefined) {
       const value = String(body.mihomoPath || '').trim();
       if (value && !value.startsWith('/')) return apiError(res, 400, 'Mihomo 路径需要是绝对路径，例如 /opt/mihomo/mihomo');
