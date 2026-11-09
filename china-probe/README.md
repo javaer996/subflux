@@ -1,4 +1,4 @@
-# SubFlux 国内探针
+# SubFlux 国内探针（china-probe）
 
 在中国大陆的机器上运行，用于判断节点在国内是否可达。探针**不拉订阅、不保存节点库**，只接收主服务通过内网 / Tailscale 发来的测试请求。
 
@@ -18,7 +18,7 @@ MIHOMO_BIN=/path/to/mihomo \
 node probe.js
 ```
 
-默认监听 `0.0.0.0:8899`。`PROBE_HOST` 建议直接绑定 Tailscale IP，避免暴露到公网。
+默认监听 `0.0.0.0:8899`。`PROBE_HOST` 建议直接绑定 Tailscale IP，避免暴露到公网。也可以用 `./start.sh` 后台启动（读取相同的环境变量，日志写入 probe.log）。
 
 环境变量：
 

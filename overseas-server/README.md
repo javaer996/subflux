@@ -1,11 +1,11 @@
-# SubFlux 主服务
+# SubFlux 国外主服务
 
 部署在国外的聚合面板：拉取多个订阅、解析节点、做画像与检测、按条件筛选，并生成多客户端订阅。
 
 ## 启动
 
 ```bash
-cd server
+cd overseas-server
 npm install
 ./start.sh      # 后台启动，日志写入 server.log
 # 或 node server.js
@@ -89,7 +89,7 @@ Sing-box 会转换常用规则并使用远程 `geosite-cn` / `geoip-cn` rule-set
 
 ## 中国连通检测
 
-主服务在国外无法直接判断节点在国内是否可达，需要配合 `../probe/` 部署国内探针。配置后在节点池使用「CN 实际」执行实际代理检测，详见 [../probe/README.md](../probe/README.md)。
+主服务在国外无法直接判断节点在国内是否可达，需要配合 `../china-probe/` 部署国内探针。配置后在节点池使用「CN 实际」执行实际代理检测，详见 [../china-probe/README.md](../china-probe/README.md)。
 
 ## 数据与安全
 

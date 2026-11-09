@@ -5,8 +5,8 @@
 仓库按部署位置分成两个独立目录，代码互不依赖：
 
 ```text
-server/   国外主服务：面板、订阅解析、节点管理、订阅生成、站点检测
-probe/    国内探针：在中国大陆发起 TCP / 实际代理连通检测
+overseas-server/  国外主服务：面板、订阅解析、节点管理、订阅生成、站点检测
+china-probe/      国内探针：在中国大陆发起 TCP / 实际代理连通检测
 ```
 
 - 只有国外主服务需要长期运行，端口 `8888`。
@@ -16,7 +16,7 @@ probe/    国内探针：在中国大陆发起 TCP / 实际代理连通检测
 ## 目录
 
 ```text
-server/
+overseas-server/
   server.js           HTTP / API / 订阅端点
   lib/                解析、生成、检测、存储
   public/             前端（原生 HTML/CSS/JS）
@@ -24,7 +24,7 @@ server/
   data/               运行时数据（不入库）
   start.sh stop.sh    后台启停
 
-probe/
+china-probe/
   probe.js            中国大陆探针
   Dockerfile          探针容器镜像（内置 Mihomo）
 ```
@@ -32,7 +32,7 @@ probe/
 ## 启动主服务
 
 ```bash
-cd server
+cd overseas-server
 npm install
 ./start.sh          # 后台启动，日志在 server.log
 # 或 node server.js
@@ -40,7 +40,7 @@ npm install
 
 打开 `http://<主机IP>:8888`。
 
-`bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `server/bin/README.md` 下载，或设置 `MIHOMO_BIN`。没有它时面板仍可启动，但站点检测和 CN 实际检测不可用。
+`bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `overseas-server/bin/README.md` 下载，或设置 `MIHOMO_BIN`。没有它时面板仍可启动，但站点检测和 CN 实际检测不可用。
 
 环境变量：
 
@@ -77,7 +77,7 @@ http://<host>:8888/sub/<token>/plain
 - **流量识别**：读取 `Subscription-Userinfo`；流量耗尽或过期时可自动剔除。
 - **IP 画像**：入口 IP 的 ASN 类型（家宽 / 机房 / CDN / 移动 / 企业）+ 启发式质量分。
 - **站点解锁**：通过 Mihomo 让节点真实访问站点，默认 YouTube / ChatGPT / Claude / Grok / Gemini，结果以 `YT·GPT·CL·GRK·GEM` 写入节点名。
-- **CN 连通检测**：由 `probe/` 从中国大陆发起 TCP 或实际代理检测（含 HY2 / TUIC / WireGuard）。
+- **CN 连通检测**：由 `china-probe/` 从中国大陆发起 TCP 或实际代理检测（含 HY2 / TUIC / WireGuard）。
 - **分流规则**：私网直连、159 条国内常见域名显式直连、AI / 流媒体代理、`GEOSITE/GEOIP CN` 兜底，支持可视化自定义规则。
 - **输出格式**：Clash / Mihomo、Sing-box、Base64、纯节点链接；已通过 `mihomo -t` 与 `sing-box check`。
 
@@ -93,14 +93,14 @@ http://<host>:8888/sub/<token>/plain
 6. `.cn` + `GEOSITE,cn` + `GEOIP,CN` 兜底
 7. `MATCH` 走手动选择
 
-国内域名清单在 `server/lib/cn-direct.js`。自定义规则使用可视化编辑器，不需要手写语法；也可在单订阅中追加，优先级高于默认规则。
+国内域名清单在 `overseas-server/lib/cn-direct.js`。自定义规则使用可视化编辑器，不需要手写语法；也可在单订阅中追加，优先级高于默认规则。
 
 ## 清理说明
 
 - 生成的 Clash 配置不使用 YAML 锚点，兼容性更好。
 - Sing-box 使用远程 `geosite-cn` / `geoip-cn` rule-set，首次启动需联网下载。
-- `Mihomo` 使用 GPL-3.0，许可证见 `server/bin/MIHOMO_LICENSE`。
+- `Mihomo` 使用 GPL-3.0，许可证见 `overseas-server/bin/MIHOMO_LICENSE`。
 
 ## 许可
 
-本项目代码以 MIT 许可发布。`server/bin/` 下的 Mihomo 二进制不属于本仓库，遵循其自身的 GPL-3.0 许可。
+本项目代码以 MIT 许可发布。`overseas-server/bin/` 下的 Mihomo 二进制不属于本仓库，遵循其自身的 GPL-3.0 许可。

@@ -1,24 +1,26 @@
-# Dependencies
+# 依赖
 node_modules/
 
-# Runtime data: subscriptions, tokens, node databases
+# 运行时数据：订阅地址、令牌、节点库，绝不入库
 data/
-server/data/
+overseas-server/data/
 
-# Logs and pid files
+# 日志与 pid
 *.log
-server.log
 *.pid
-.subflux.pid
 
-# Runtime binaries (architecture-specific, not distributed)
-server/bin/mihomo
-server/bin/mihomo-*
+# 运行时二进制：体积大且区分架构，不入库
+overseas-server/bin/mihomo
+overseas-server/bin/mihomo-*
 bin/mihomo
 bin/mihomo-*
-.validate/
 
-# Local env
+# 本地临时文件
+.validate/
+tmp/
 .env
 .env.*
 .DS_Store
+china-probe/probe.pid
+china-probe/probe.log
+china-probe/.probe.pid
