@@ -1,17 +1,14 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { ProxyAgent, fetch as proxyFetch } from 'undici';
 import { uid, sleep, errMessage } from './util.js';
 import { evaluateSiteResult } from './sites.js';
+import { describeEngine } from './engine.js';
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const ENGINE = process.env.MIHOMO_BIN || path.join(ROOT, 'bin', 'mihomo');
 const MAX_TEXT = 220_000;
 
 function jobSnapshot(job) {
@@ -115,7 +112,7 @@ export class SiteTester {
   enqueueAuto(nodes) {
     const settings = this.store.state.settings;
     if (settings.autoSite === false) return;
-    if (!existsSync(ENGINE)) return;
+    if (!this.engineInfo().available) return;
     const sites = (settings.sites || []).filter((site) => site.enabled !== false);
     if (!sites.length) return;
     const limit = Math.max(1, Number(settings.siteCheckLimit) || 30);
@@ -132,9 +129,20 @@ export class SiteTester {
     });
   }
 
+  /** 当前设置下解析出来的引擎信息（含是否可执行）。 */
+  engineInfo() {
+    return describeEngine(this.store.state.settings.mihomoPath || '');
+  }
+
+  enginePath() {
+    return this.engineInfo().path;
+  }
+
   async engineAvailable() {
+    const info = this.engineInfo();
+    if (!info.available || !info.path) return false;
     try {
-      await fs.access(ENGINE, fsConstants.X_OK);
+      await fs.access(info.path, fsConstants.X_OK);
       return true;
     } catch {
       return false;
@@ -176,7 +184,7 @@ export class SiteTester {
 
   async run(nodes, sites, job) {
     if (!(await this.engineAvailable())) {
-      throw new Error(`未找到可执行的 Mihomo 引擎：${ENGINE}`);
+      throw new Error(`未找到可执行的 Mihomo 引擎：${this.enginePath() || '未配置'}`);
     }
     const runtimeDir = path.join(this.store.dataDir, `.site-test-${job.id}`);
     await fs.mkdir(runtimeDir, { recursive: true });
@@ -240,7 +248,7 @@ export class SiteTester {
     try {
       job.total = proxies.length;
       job.note = `已载入 ${proxies.length} 个节点，正在启动引擎`;
-      engine = spawn(ENGINE, ['-f', configPath, '-d', runtimeDir], {
+      engine = spawn(this.enginePath(), ['-f', configPath, '-d', runtimeDir], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, NO_COLOR: '1' },
       });

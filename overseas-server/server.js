@@ -1,6 +1,5 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
@@ -14,6 +13,7 @@ import { detectClientFormat } from './lib/clients.js';
 import { normalizeSites } from './lib/sites.js';
 import { normalizeRouting, normalizeRuleList, parseCustomRules } from './lib/routing.js';
 import { CN_DIRECT_COUNT } from './lib/cn-direct.js';
+import { describeEngine } from './lib/engine.js';
 import { refreshSource, isRefreshing, testFetchProxy, nextRunAt } from './lib/refresher.js';
 import { buildOutput, normalizeFormat, profileSummary } from './lib/generator.js';
 import { buildState, nodeQueryFilter, serializeNode, serializeSource, sortNodeList } from './lib/presentation.js';
@@ -35,8 +35,6 @@ const tester = new Tester(store, quality);
 const siteTester = new SiteTester(store);
 const chinaTester = new ChinaTester(store);
 const scheduler = new Scheduler(store, tester, siteTester);
-const SITE_ENGINE = path.join(__dirname, 'bin', 'mihomo');
-const SITE_ENGINE_AVAILABLE = existsSync(SITE_ENGINE);
 let refreshingAll = false;
 
 const MIME = {
@@ -183,8 +181,10 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/state' && method === 'GET') {
-    const state = buildState(store, tester, siteTester, chinaTester, STARTED_AT, SITE_ENGINE_AVAILABLE);
-    state.meta.siteEnginePath = SITE_ENGINE_AVAILABLE ? 'bin/mihomo' : '';
+    const engine = describeEngine(store.state.settings.mihomoPath || '');
+    const state = buildState(store, tester, siteTester, chinaTester, STARTED_AT, engine.available);
+    state.meta.siteEnginePath = engine.available ? engine.path : '';
+    state.meta.engine = engine;
     state.meta.chinaProbeConfigured = Boolean(store.state.settings.chinaProbeUrl);
     state.meta.chinaProbeReverseConfigured = Boolean(store.state.settings.chinaProbeReverseUrl);
     state.meta.directDomainCount = CN_DIRECT_COUNT;
@@ -431,11 +431,13 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/nodes/sites' && method === 'POST') {
-    if (!SITE_ENGINE_AVAILABLE) return apiError(res, 503, '站点检测引擎不存在（bin/mihomo）');
     if (tester.status()?.running || siteTester.status()?.running) {
       return apiError(res, 409, '已有测试任务正在运行', { job: tester.status() || siteTester.status() });
     }
-    if (!(await siteTester.engineAvailable())) return apiError(res, 503, '站点检测引擎不可执行');
+    if (!(await siteTester.engineAvailable())) {
+      const info = siteTester.engineInfo();
+      return apiError(res, 503, `站点检测引擎不可执行：${info.path || '未配置'}（可在设置里指定 Mihomo 路径）`);
+    }
     const sites = (store.state.settings.sites || []).filter((site) => site.enabled !== false);
     if (!sites.length) return apiError(res, 400, '没有启用站点检测项，请先在设置中添加');
     const body = await readBody(req);
@@ -649,6 +651,11 @@ async function handleApi(req, res, url) {
     }
     if (body.chinaProbeTimeoutMs !== undefined) s.chinaProbeTimeoutMs = safeInt(body.chinaProbeTimeoutMs, s.chinaProbeTimeoutMs, 1000, 15000);
     if (body.siteCheckLimit !== undefined) s.siteCheckLimit = safeInt(body.siteCheckLimit, s.siteCheckLimit, 5, 200);
+    if (body.mihomoPath !== undefined) {
+      const value = String(body.mihomoPath || '').trim();
+      if (value && !value.startsWith('/')) return apiError(res, 400, 'Mihomo 路径需要是绝对路径，例如 /opt/mihomo/mihomo');
+      s.mihomoPath = value.slice(0, 500);
+    }
     if (body.sites !== undefined) {
       const sites = normalizeSites(body.sites);
       s.sites = sites;
@@ -668,7 +675,7 @@ async function handleApi(req, res, url) {
       const unknown = store.state.nodes.filter((n) => n.qualityScore == null).slice(0, 1000);
       if (unknown.length) tester.enqueueAuto(unknown);
     }
-    return sendJson(res, 200, { ok: true, settings: s });
+    return sendJson(res, 200, { ok: true, settings: s, engine: describeEngine(s.mihomoPath || '') });
   }
 
   if (pathname === '/api/events' && method === 'GET') {

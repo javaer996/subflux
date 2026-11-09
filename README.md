@@ -97,7 +97,7 @@ npm install
 
 打开 `http://<主机IP>:8888`。
 
-`bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `overseas-server/bin/README.md` 下载，或设置 `MIHOMO_BIN`。没有它时面板仍可启动，但站点检测和 CN 实际检测不可用。
+`bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `overseas-server/bin/README.md` 下载，或设置 `MIHOMO_BIN`。也可以用 Docker Compose（引擎自动下载到 `/opt/mihomo/mihomo`），或在面板「设置 → 站点解锁检测 → Mihomo 引擎路径」里直接填绝对路径。找不到引擎时面板仍可启动，但站点检测、自动站点检测和 CN 实际检测不可用。
 
 环境变量：
 
@@ -106,7 +106,7 @@ npm install
 | `PORT` | `8888` | 监听端口 |
 | `HOST` | `0.0.0.0` | 绑定地址 |
 | `DATA_DIR` | `./data` | 数据目录 |
-| `MIHOMO_BIN` | `./bin/mihomo` | 站点检测引擎路径 |
+| `MIHOMO_BIN` | 自动查找 | 站点检测引擎路径；未设置时依次尝试 `/opt/mihomo/mihomo`（compose 默认下载位置）→ `bin/mihomo` |
 
 ## 使用流程
 

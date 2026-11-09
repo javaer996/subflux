@@ -36,6 +36,8 @@ const ICONS = {
   chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
   chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
   chevronDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  pageFirst: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 18-6-6 6-6"/><path d="m11 18-6-6 6-6"/><path d="M5 6v12"/></svg>',
+  pageLast: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 6 6-6 6"/><path d="m13 6 6 6-6 6"/><path d="M19 6v12"/></svg>',
   zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>',
   filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9Z"/><path d="M9 21v-7h6v7"/></svg>',
@@ -1181,11 +1183,12 @@ function renderNodes() {
   const totalAll = state.stats.nodes.total;
   const selectedCount = App.selected.size;
   const engineReady = Boolean(state.meta.siteEngine);
+  const enginePath = state.meta.engine?.path || state.meta.siteEnginePath || '';
   return `
     <section class="view">
       ${pageHead('NODE POOL', '节点池', 'TCP 测速只测入口端口，HY2 / TUIC 等 UDP 协议会被跳过；UDP 节点的实际连通由站点检测确认。IP 类型与入口质量分来自入口 IP 的 ASN 画像。', `
         <button class="btn btn-ghost" data-action="test-selected" ${selectedCount ? '' : 'disabled'}>${ico('play')}<span>测试选中${selectedCount ? ` (${selectedCount})` : ''}</span></button>
-        <button class="btn btn-ghost" data-action="test-sites" ${(selectedCount || totalAll) ? '' : 'disabled'} title="${engineReady ? '通过节点真实访问网站' : '站点检测引擎未安装'}">${ico('globe')}<span>站点检测${selectedCount ? ` (${selectedCount})` : ''}</span>${engineReady ? '' : ' · 引擎缺失'}</button>
+        <button class="btn btn-ghost" data-action="test-sites" ${(selectedCount || totalAll) ? '' : 'disabled'} title="${engineReady ? `通过节点真实访问网站，引擎：${enginePath}` : `站点检测引擎不可执行：${enginePath || '未配置'}`}">${ico('globe')}<span>站点检测${selectedCount ? ` (${selectedCount})` : ''}</span>${engineReady ? '' : ' · 引擎缺失'}</button>
         <button class="btn btn-ghost" data-action="test-china" ${(selectedCount || totalAll) && state.meta.chinaProbeConfigured ? '' : 'disabled'} title="${state.meta.chinaProbeConfigured ? '通过中国探针实际代理访问（支持 HY2/TUIC 等 UDP）' : '请先在设置中配置中国探针'}">${ico('server')}<span>CN 实际${selectedCount ? ` (${selectedCount})` : ''}</span></button>
         <button class="btn btn-primary" data-action="test-filter" ${totalAll ? '' : 'disabled'}>${ico('zap')}<span>测速当前筛选</span></button>
       `)}
@@ -1419,13 +1422,20 @@ function nodeEmptyState() {
 }
 
 function nodePagination(data) {
+  const pages = Math.max(1, data.pages || 1);
+  const page = Math.min(Math.max(1, data.page || 1), pages);
   return `
     <div class="pagination">
-      <span class="page-info">显示 ${fmtNum((data.page - 1) * data.pageSize + 1)}–${fmtNum(Math.min(data.page * data.pageSize, data.total))}，共 ${fmtNum(data.total)} 个</span>
+      <span class="page-info">显示 ${fmtNum((page - 1) * data.pageSize + 1)}–${fmtNum(Math.min(page * data.pageSize, data.total))}，共 ${fmtNum(data.total)} 个</span>
       <div class="page-btns">
-        <button class="btn btn-ghost btn-sm" data-action="node-page" data-page="${data.page - 1}" ${data.page <= 1 ? 'disabled' : ''}>${ico('chevronLeft')}</button>
-        <span class="page-info" style="padding:0 6px">${data.page} / ${data.pages}</span>
-        <button class="btn btn-ghost btn-sm" data-action="node-page" data-page="${data.page + 1}" ${data.page >= data.pages ? 'disabled' : ''}>${ico('chevronRight')}</button>
+        <button class="btn btn-ghost btn-sm" data-action="node-page" data-page="1" ${page <= 1 ? 'disabled' : ''} title="第一页" aria-label="第一页">${ico('pageFirst')}</button>
+        <button class="btn btn-ghost btn-sm" data-action="node-page" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} title="上一页" aria-label="上一页">${ico('chevronLeft')}</button>
+        <span class="page-jump">
+          <input class="input page-input" id="page-jump-input" type="number" min="1" max="${pages}" value="${page}" aria-label="跳转到页码">
+          <span class="page-info">/ ${pages}</span>
+        </span>
+        <button class="btn btn-ghost btn-sm" data-action="node-page" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''} title="下一页" aria-label="下一页">${ico('chevronRight')}</button>
+        <button class="btn btn-ghost btn-sm" data-action="node-page" data-page="${pages}" ${page >= pages ? 'disabled' : ''} title="最后一页" aria-label="最后一页">${ico('pageLast')}</button>
       </div>
     </div>`;
 }
@@ -1458,6 +1468,20 @@ async function loadNodes() {
   } finally {
     if (seq === App.nodeLoadSeq) App.nodeLoading = false;
   }
+}
+
+/** 跳转节点池分页：自动夹在 1..总页数，同页不重复请求。 */
+async function goNodePage(target) {
+  const pages = Math.max(1, App.nodeData?.pages || 1);
+  const page = Math.min(Math.max(1, Math.round(Number(target) || 1)), pages);
+  if (page === App.nodePage && App.nodeData?.items?.length) {
+    $('#page-jump-input')?.blur();
+    return;
+  }
+  App.nodePage = page;
+  await loadNodes();
+  render();
+  $('.pagination')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function nodeFilterPayload() {
@@ -1507,7 +1531,10 @@ async function startNodeTest(options = {}) {
 }
 
 async function startSiteTest(options = {}) {
-  if (!App.state.meta.siteEngine) return toast('站点检测引擎不存在：bin/mihomo', 'error');
+  const engine = App.state.meta.engine || {};
+  if (!engine.available && !App.state.meta.siteEngine) {
+    return toast(`站点检测引擎不可执行：${engine.path || '未配置'}，可在设置中指定 Mihomo 路径`, 'error', 7000);
+  }
   const enabledSites = (App.state.settings.sites || []).filter((s) => s.enabled !== false);
   if (!enabledSites.length) return toast('请先在设置中启用至少一个检测站点', 'warn');
   try {
@@ -2158,6 +2185,8 @@ function siteSettingRow(site) {
 function renderSettings() {
   const s = App.state.settings;
   const meta = App.state.meta;
+  const engineMeta = meta.engine || { available: Boolean(meta.siteEngine), path: meta.siteEnginePath || '', from: '', defaultPath: '/opt/mihomo/mihomo', candidates: [] };
+  const engineReady = Boolean(engineMeta.available);
   const tokens = ['{flag}', '{region}', '{type}', '{quality}', '{score}', '{seq:02}', '{isp}', '{asn}', '{protocol}', '{source}', '{sites}', '{name}'];
   return `
     <section class="view">
@@ -2258,12 +2287,17 @@ function renderSettings() {
                 <div class="field-hint">检测逐节点串行，建议 20–50；所有站点并行访问。</div>
               </div>
               <div class="field">
-                <label>检测引擎</label>
+                <label>引擎状态</label>
                 <div class="field-row" style="padding-top:4px">
-                  <span class="tiny ${meta.siteEngine ? 'muted' : ''}" style="${meta.siteEngine ? '' : 'color:var(--red)'}">${meta.siteEngine ? 'Mihomo 已就绪 · bin/mihomo' : '未找到可执行引擎'}</span>
-                  <span class="badge ${meta.siteEngine ? 'badge-mint' : 'badge-red'}">${meta.siteEngine ? 'READY' : 'MISSING'}</span>
+                  <span class="tiny" style="${engineReady ? 'color:var(--muted-2)' : 'color:var(--red)'}">${engineReady ? `已就绪 · ${esc(engineMeta.from || '')}` : '未找到可执行引擎'}</span>
+                  <span class="badge ${engineReady ? 'badge-mint' : 'badge-red'}">${engineReady ? 'READY' : 'MISSING'}</span>
                 </div>
               </div>
+            </div>
+            <div class="field" style="margin-top:12px">
+              <label for="setting-mihomo-path">Mihomo 引擎路径</label>
+              <input class="input mono" id="setting-mihomo-path" name="mihomoPath" value="${esc(s.mihomoPath || '')}" placeholder="${esc(engineMeta.defaultPath || '/opt/mihomo/mihomo')}">
+              <div class="field-hint">留空时依次尝试：环境变量 <span class="code-inline">MIHOMO_BIN</span> → <span class="code-inline">${esc(engineMeta.defaultPath || '/opt/mihomo/mihomo')}</span>（docker compose 默认下载位置）→ 项目内置 <span class="code-inline">bin/mihomo</span>。当前解析结果：<span class="code-inline">${esc(engineMeta.path || '无')}</span></div>
             </div>
             <div class="site-list-head">
               <span>启用</span><span>站点名称</span><span>简写</span><span>检测地址</span><span></span><span></span>
@@ -2486,6 +2520,7 @@ function bindSettings() {
       chinaProbeReverseUrl: String(fd.get('chinaProbeReverseUrl') || '').trim(),
       excludeDepleted: fd.get('excludeDepleted') === 'on',
       siteCheckLimit: Number(fd.get('siteCheckLimit')) || 30,
+      mihomoPath: String(fd.get('mihomoPath') || '').trim(),
       sites,
       routing: {
         domesticDirect: fd.get('domesticDirect') === 'on',
@@ -2882,10 +2917,7 @@ function bindGlobalEvents() {
     if (action === 'node-page') {
       const page = Number(actionEl.dataset.page);
       if (!Number.isFinite(page)) return;
-      App.nodePage = page;
-      await loadNodes();
-      render();
-      $('.filter-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      await goNodePage(page);
       return;
     }
     if (action === 'reset-node-filters') return resetNodeFilters();
@@ -2966,7 +2998,20 @@ function bindGlobalEvents() {
     }
   });
 
+  // 点进页码输入框时全选，直接输入即可覆盖，不用手动删旧数字。
+  document.addEventListener('focusin', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.id === 'page-jump-input') target.select();
+  });
+
   document.addEventListener('keydown', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.id === 'page-jump-input' && event.key === 'Enter') {
+      event.preventDefault();
+      const page = Number(target.value);
+      if (Number.isFinite(page)) goNodePage(page);
+      return;
+    }
     if (event.key === 'Escape') {
       if (App.drawer) closeDrawer();
       else if (App.modalOpen) closeModal();

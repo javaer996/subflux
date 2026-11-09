@@ -18,9 +18,9 @@ npm install
 | `PORT` | `8888` | 监听端口 |
 | `HOST` | `0.0.0.0` | 绑定地址 |
 | `DATA_DIR` | `./data` | 数据目录 |
-| `MIHOMO_BIN` | `./bin/mihomo` | 站点检测引擎路径 |
+| `MIHOMO_BIN` | 自动查找 | 站点检测引擎路径；未设置时依次尝试 `/opt/mihomo/mihomo`（compose 默认下载位置）→ `bin/mihomo` |
 
-`bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `bin/README.md` 下载。没有它时面板仍可启动，但站点检测、自动站点检测和 CN 实际检测不可用。
+`bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `bin/README.md` 下载，或设置 `MIHOMO_BIN`。引擎查找顺序是：设置里的路径 → `MIHOMO_BIN` → `/opt/mihomo/mihomo`（Docker Compose 默认下载位置）→ 项目内置 `bin/mihomo`；面板「设置 → 站点解锁检测」里可以看到当前解析到哪个路径。找不到引擎时面板仍可启动，但站点检测、自动站点检测和 CN 实际检测不可用。
 
 ## 使用流程
 
