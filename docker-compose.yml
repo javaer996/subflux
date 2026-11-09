@@ -1,0 +1,94 @@
+# SubFlux 国外主服务 · 纯 compose 部署（不需要 Dockerfile）
+#
+#   cp .env.example .env      # 按需修改端口 / 仓库 / Mihomo 镜像
+#   docker compose up -d
+#
+# 启动链路：
+#   sources（alpine/git）拉取或更新 GitHub 代码到命名卷
+#     → app（node:22-bookworm-slim）装依赖（宿主机缓存）→ 下载 Mihomo（宿主机缓存）→ 启动面板
+#
+# 宿主机目录：
+#   ./cache/node_modules   依赖，只在首次启动或 package-lock.json 变化时安装
+#   ./cache/npm            npm 下载缓存，重装时不必重新下载
+#   ./cache/mihomo         Mihomo 二进制，下载一次长期复用
+#   ./data                 运行时数据（db.json）
+
+name: subflux
+
+services:
+  # 只运行一次：把 GitHub 代码同步到命名卷，已有源码时做增量更新
+  sources:
+    image: alpine/git:latest
+    container_name: subflux-sources
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      REPO_URL: ${REPO_URL:-https://github.com/javaer996/subflux.git}
+      GIT_REF: ${GIT_REF:-main}
+    command:
+      - |
+        set -eu
+        if [ ! -d /src/.git ]; then
+          echo "[sources] 初始化代码卷"
+          git init -q /src
+        fi
+        if git -C /src remote get-url origin >/dev/null 2>&1; then
+          git -C /src remote set-url origin "$$REPO_URL"
+        else
+          echo "[sources] 拉取 $$REPO_URL ($$GIT_REF)"
+          git -C /src remote add origin "$$REPO_URL"
+        fi
+        # 只做 fetch + reset，不删目录：node_modules / data 是宿主机挂载点
+        git -C /src fetch --depth 1 origin "$$GIT_REF"
+        git -C /src reset --hard FETCH_HEAD
+        # 清掉上游已删除的源码，但保留宿主机缓存挂载点
+        git -C /src clean -fd \
+          -e overseas-server/node_modules \
+          -e overseas-server/data
+        echo "[sources] 当前提交 $$(git -C /src rev-parse --short HEAD)"
+    volumes:
+      - subflux-src:/src
+    restart: "no"
+
+  app:
+    image: node:22-bookworm-slim
+    container_name: subflux
+    depends_on:
+      sources:
+        condition: service_completed_successfully
+    working_dir: /src/overseas-server
+    command: ["node", "/src/docker/bootstrap.mjs"]
+    environment:
+      APP_DIR: /src/overseas-server
+      APP_ENTRY: server.js
+      PORT: "8888"
+      HOST: 0.0.0.0
+      DATA_DIR: /data
+      MIHOMO_BIN: /opt/mihomo/mihomo
+      MIHOMO_VERSION: ${MIHOMO_VERSION:-1.19.33}
+      MIHOMO_URL: ${MIHOMO_URL:-}
+      MIHOMO_MIRROR: ${MIHOMO_MIRROR:-}
+      INSTALL_MIHOMO: ${INSTALL_MIHOMO:-1}
+      NODE_OPTIONS: --max-old-space-size=256
+    ports:
+      - "${SUBFLUX_PORT:-8888}:8888"
+    volumes:
+      - subflux-src:/src
+      - ./data:/data
+      - ./cache/node_modules:/src/overseas-server/node_modules
+      - ./cache/npm:/root/.npm
+      - ./cache/mihomo:/opt/mihomo
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8888/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  subflux-src:
+    name: subflux-src

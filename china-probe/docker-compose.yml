@@ -1,0 +1,78 @@
+# SubFlux 国内探针 · 纯 compose 部署（不需要 Dockerfile）
+#
+#   cd china-probe
+#   PROBE_TOKEN='至少16位随机字符串' docker compose up -d
+#
+# 流程：alpine/git 拉取代码 → node 镜像内下载 Mihomo → 启动 probe.js
+
+name: subflux-probe
+
+services:
+  sources:
+    image: alpine/git:latest
+    container_name: subflux-probe-sources
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      REPO_URL: ${REPO_URL:-https://github.com/javaer996/subflux.git}
+      GIT_REF: ${GIT_REF:-main}
+    command:
+      - |
+        set -eu
+        if [ ! -d /src/.git ]; then
+          echo "[sources] 初始化代码卷"
+          git init -q /src
+        fi
+        if git -C /src remote get-url origin >/dev/null 2>&1; then
+          git -C /src remote set-url origin "$$REPO_URL"
+        else
+          echo "[sources] 拉取 $$REPO_URL ($$GIT_REF)"
+          git -C /src remote add origin "$$REPO_URL"
+        fi
+        git -C /src fetch --depth 1 origin "$$GIT_REF"
+        git -C /src reset --hard FETCH_HEAD
+        git -C /src clean -fd
+        echo "[sources] 当前提交 $$(git -C /src rev-parse --short HEAD)"
+    volumes:
+      - subflux-probe-src:/src
+    restart: "no"
+
+  probe:
+    image: node:22-bookworm-slim
+    container_name: subflux-probe
+    depends_on:
+      sources:
+        condition: service_completed_successfully
+    working_dir: /src/china-probe
+    command: ["node", "/src/docker/bootstrap.mjs"]
+    environment:
+      APP_DIR: /src/china-probe
+      APP_ENTRY: probe.js
+      PROBE_TOKEN: ${PROBE_TOKEN:?请设置 PROBE_TOKEN（至少 16 位）}
+      PROBE_PORT: "8899"
+      PROBE_HOST: ${PROBE_HOST:-0.0.0.0}
+      PROBE_DATA_DIR: /tmp
+      MIHOMO_BIN: /opt/mihomo/mihomo
+      MIHOMO_VERSION: ${MIHOMO_VERSION:-1.19.33}
+      MIHOMO_URL: ${MIHOMO_URL:-}
+      MIHOMO_MIRROR: ${MIHOMO_MIRROR:-}
+      INSTALL_MIHOMO: "1"
+    ports:
+      - "${PROBE_BIND:-0.0.0.0}:${PROBE_PORT:-8899}:8899"
+    volumes:
+      - subflux-probe-src:/src
+      - ./cache/mihomo:/opt/mihomo
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8899/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  subflux-probe-src:
+    name: subflux-probe-src

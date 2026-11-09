@@ -30,29 +30,40 @@ node probe.js
 | `MIHOMO_BIN` | `mihomo` | Mihomo 可执行文件路径 |
 | `PROBE_DATA_DIR` | 系统临时目录 | Mihomo 临时配置目录 |
 
-## 容器运行
+## 用 Docker Compose 部署（推荐）
 
-`Dockerfile` 会自动下载对应架构的 Mihomo：
-
-```bash
-docker build -t subflux-probe .
-docker run -d --name subflux-probe --restart unless-stopped \
-  --network host \
-  -e PROBE_TOKEN='至少16位随机字符串' \
-  -e PROBE_HOST='100.x.y.z' \
-  subflux-probe
-```
-
-GitHub 下载慢时可以用 `--build-arg MIHOMO_URL='https://你的地址/mihomo.gz'`，或把已有的 mihomo 挂载进容器并设置 `MIHOMO_BIN`。
-
-桥接网络：
+不需要 Dockerfile，compose 直接拉官方镜像。`china-probe/docker-compose.yml` 会在容器内自动下载对应架构的 Mihomo，并把二进制缓存到宿主机 `./cache/mihomo`：
 
 ```bash
-docker run -d --name subflux-probe --restart unless-stopped \
-  -p 100.x.y.z:8899:8899 \
-  -e PROBE_TOKEN='至少16位随机字符串' \
-  subflux-probe
+cd china-probe
+PROBE_TOKEN='至少16位随机字符串' PROBE_BIND='100.x.y.z' docker compose up -d
 ```
+
+`PROBE_BIND` 是国内机器的 Tailscale IP；填 `0.0.0.0` 会监听所有网卡，不建议。启动后：
+
+```bash
+docker compose logs -f probe          # 会打印"Mihomo 可用"和监听地址
+curl http://100.x.y.z:8899/health     # {"ok":true,"probe":"china",...}
+```
+
+宿主机目录：
+
+```text
+./cache/mihomo    Mihomo 二进制，下载一次长期复用
+```
+
+更新代码和重启：
+
+```bash
+docker compose run --rm sources       # 重新拉取 GitHub 代码
+docker compose up -d probe            # 重启；依赖为 0，Mihomo 直接复用
+```
+
+GitHub 下载慢时设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com`，或 `MIHOMO_URL` 给完整 `.gz` 直链。
+
+## 裸机运行
+
+把已有的 mihomo 放好并设置 `MIHOMO_BIN`，或用 `./start.sh` 后台启动（读取相同的环境变量，日志写入 probe.log）。
 
 ## 在主服务中配置
 

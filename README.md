@@ -16,20 +16,73 @@ china-probe/      国内探针：在中国大陆发起 TCP / 实际代理连通�
 ## 目录
 
 ```text
+docker-compose.yml   国外主服务的 compose 部署（不需要 Dockerfile）
+.env.example         compose 环境变量示例
+docker/
+  bootstrap.mjs      容器启动引导：依赖缓存、下载 Mihomo、转发信号
+
 overseas-server/
   server.js           HTTP / API / 订阅端点
   lib/                解析、生成、检测、存储
   public/             前端（原生 HTML/CSS/JS）
   bin/                站点检测引擎放置位置（二进制不入库）
   data/               运行时数据（不入库）
-  start.sh stop.sh    后台启停
+  start.sh stop.sh    裸机后台启停
 
 china-probe/
   probe.js            中国大陆探针
-  Dockerfile          探针容器镜像（内置 Mihomo）
+  docker-compose.yml  探针的 compose 部署（不需要 Dockerfile）
+  start.sh            裸机后台启停
 ```
 
-## 启动主服务
+## 用 Docker Compose 部署（推荐）
+
+只需要 Docker 和 compose，**不需要 Dockerfile，也不用在本机构建镜像**。`docker-compose.yml` 直接拉官方 `node:22-bookworm-slim` 和 `alpine/git`：
+
+```bash
+cp .env.example .env     # 可选，改端口 / 仓库地址 / Mihomo 镜像
+docker compose up -d
+```
+
+启动链路：
+
+1. `sources` 用 `alpine/git` 把 GitHub 代码克隆 / 更新到命名卷 `subflux-src`，更新时只做 `fetch + reset --hard`，不重新克隆。
+2. `app` 用 `node:22-bookworm-slim` 运行 `docker/bootstrap.mjs`：
+   - 依赖装到宿主机 `./cache/node_modules`，用 `package-lock.json` 哈希做标记，**只有首次启动或 lock 变化才执行 `npm ci`**；
+   - npm 下载缓存在 `./cache/npm`，重装时无需重新下载；
+   - Mihomo 下载到 `./cache/mihomo`，已有可执行文件就直接复用，不重复下载；
+   - 以子进程启动 `server.js`，并把 `SIGTERM` 转发给它，`docker stop` 能优雅退出。
+3. 数据落在 `./data`，容器重建不丢。
+
+宿主机目录：
+
+```text
+./data                  db.json
+./cache/node_modules    依赖（跨重启复用）
+./cache/npm             npm 缓存
+./cache/mihomo          mihomo 二进制
+```
+
+常用操作：
+
+```bash
+docker compose logs -f app        # 看日志，会打印"依赖已就绪，复用宿主机缓存"
+docker compose restart app        # 重启：不重装依赖、不重下 Mihomo
+docker compose down               # 停止；加 -v 会连代码卷一起删，宿主机缓存目录仍在
+```
+
+改了代码后要更新部署：
+
+```bash
+docker compose run --rm sources    # 重新拉取代码
+docker compose up -d app           # 重启应用
+```
+
+`REPO_URL` 可以换成自己的 fork；私有仓库用 `https://<token>@github.com/...` 或把 SSH key 挂进 `sources`。GitHub 下载 Mihomo 慢时设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com` 或直接给 `MIHOMO_URL` 完整 `.gz` 直链。
+
+没装 Docker 时也可以裸机跑，见 `overseas-server/README.md`；国内探针的容器部署见 `china-probe/README.md`。
+
+## 启动主服务（裸机）
 
 ```bash
 cd overseas-server

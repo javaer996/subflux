@@ -15,11 +15,18 @@ overseas-server/bin/mihomo-*
 bin/mihomo
 bin/mihomo-*
 
+# compose 部署：宿主机缓存目录
+cache/
+
+# compose 测试目录
+.compose-test/
+
 # 本地临时文件
 .validate/
 tmp/
 .env
 .env.*
+!.env.example
 .DS_Store
 china-probe/probe.pid
 china-probe/probe.log
