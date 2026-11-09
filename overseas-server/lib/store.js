@@ -70,6 +70,15 @@ function defaultProfile() {
     testInterval: 300,
     renameTemplate: '',
     sort: 'quality',
+    push: {
+      enabled: false,
+      intervalMinutes: 1440,
+      targets: [],
+      lastPushAt: null,
+      nextPushAt: null,
+      lastStatus: '',
+      lastResults: [],
+    },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -157,6 +166,11 @@ export class Store extends EventEmitter {
         ...p,
         filters: { ...defaultProfile().filters, ...(p.filters || {}) },
         groups: { ...defaultProfile().groups, ...(p.groups || {}) },
+        push: {
+          ...defaultProfile().push,
+          ...(p.push && typeof p.push === 'object' ? p.push : {}),
+          targets: Array.isArray(p.push?.targets) ? p.push.targets : [],
+        },
       };
       profile.customRuleList = normalizeRuleList([
         ...(profile.customRuleList || []),
@@ -273,7 +287,7 @@ export function ensureUid() {
 }
 
 export function normalizeInterval(value, fallback = 360) {
-  return clamp(Number.parseInt(value, 10) || fallback, 5, 10080);
+  return clamp(Number.parseInt(value, 10) || fallback, 5, 5256000);
 }
 
 export { defaultProfile };

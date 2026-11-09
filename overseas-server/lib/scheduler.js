@@ -1,4 +1,5 @@
 import { refreshSource, isRefreshing } from './refresher.js';
+import { pushProfile, nextPushAt } from './pusher.js';
 
 export class Scheduler {
   constructor(store, tester, siteTester) {
@@ -21,6 +22,11 @@ export class Scheduler {
       }
       if (source.autoRefresh === false) source.nextRefreshAt = null;
     }
+    for (const profile of this.store.state.profiles) {
+      if (profile.push?.enabled && !profile.push.nextPushAt) {
+        profile.push.nextPushAt = nextPushAt(profile.push);
+      }
+    }
     this.store.touch();
     setTimeout(() => this.tick(), 1600).unref?.();
     this.timer = setInterval(() => this.tick(), 30_000);
@@ -34,19 +40,29 @@ export class Scheduler {
 
   async tick() {
     if (this.ticking) return;
-    if (this.store.state.settings.autoRefresh === false) return;
     this.ticking = true;
     try {
       const now = Date.now();
-      const due = this.store.state.sources
+      const autoSources = this.store.state.settings.autoRefresh === false ? [] : this.store.state.sources
         .filter((s) => s.enabled && s.kind !== 'text' && s.autoRefresh !== false && !isRefreshing(s.id))
         .filter((s) => {
           if (!s.nextRefreshAt) return true;
           return new Date(s.nextRefreshAt).getTime() <= now;
         })
         .slice(0, 2);
-      if (!due.length) return;
-      await Promise.all(due.map((source) => refreshSource(this.store, source, { tester: this.tester, siteTester: this.siteTester })));
+      const duePushes = this.store.state.profiles
+        .filter((p) => p.push?.enabled && Array.isArray(p.push.targets) && p.push.targets.length)
+        .filter((p) => !p.push.nextPushAt || new Date(p.push.nextPushAt).getTime() <= now)
+        .slice(0, 2);
+      if (!autoSources.length && !duePushes.length) return;
+      await Promise.all([
+        ...autoSources.map((source) => refreshSource(this.store, source, { tester: this.tester, siteTester: this.siteTester })),
+        ...duePushes.map((profile) => pushProfile(this.store, profile).catch((err) => {
+          console.error('[push]', err.message);
+          profile.push.nextPushAt = nextPushAt(profile.push);
+          this.store.touch();
+        })),
+      ]);
     } catch (err) {
       console.error('[scheduler]', err);
     } finally {

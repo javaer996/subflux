@@ -966,7 +966,7 @@ function openSourceModal(source = null) {
   const interval = source?.intervalMinutes || App.state.settings.defaultInterval || 360;
   const autoRefresh = source ? source.autoRefresh !== false : true;
   const proxyMode = source?.proxyMode || (source?.useProxy ? 'custom' : 'direct');
-  const quick = [30, 60, 180, 360, 720, 1440];
+  const quick = [30, 60, 180, 360, 720, 1440, 10080, 20160, 43200];
   const content = `
     <form id="source-form" autocomplete="off">
       <div class="field">
@@ -1000,9 +1000,9 @@ function openSourceModal(source = null) {
       <div class="form-grid">
         <div class="field">
           <label for="source-interval">刷新间隔（分钟）</label>
-          <input class="input" id="source-interval" name="intervalMinutes" type="number" min="5" max="10080" step="5" value="${esc(interval)}" ${autoRefresh ? '' : 'disabled'}>
+          <input class="input" id="source-interval" name="intervalMinutes" type="number" min="5" max="5256000" step="5" value="${esc(interval)}" ${autoRefresh ? '' : 'disabled'}>
           <div class="quick-values">
-            ${quick.map((m) => `<button type="button" data-interval-value="${m}">${m < 60 ? `${m} 分` : `${m / 60} 小时`}</button>`).join('')}
+            ${quick.map((m) => `<button type="button" data-interval-value="${m}">${m < 60 ? `${m} 分` : m < 1440 ? `${m / 60} 小时` : `${m / 1440} 天`}</button>`).join('')}
           </div>
           <div class="field-hint" id="source-manual-hint" ${autoRefresh ? 'style="display:none"' : ''}>已关闭自动刷新，只在你点「刷新」时抓取；间隔设置暂不生效。</div>
         </div>
@@ -1722,11 +1722,14 @@ function profileCard(profile) {
           <div class="source-badge-stack">
             ${profile.needsReview ? '<span class="badge badge-amber">需复核</span>' : profile.enabled ? '<span class="badge badge-mint">已启用</span>' : '<span class="badge badge-muted">已停用</span>'}
             <span class="badge badge-muted no-dot">${Number(profile.filters.maxNodes) > 0 ? `上限 ${profile.filters.maxNodes}` : '不限数量'}</span>
+            ${profile.push?.enabled ? `<span class="badge badge-blue no-dot">推送 · ${pushIntervalLabel(profile.push.intervalMinutes)}</span>` : ''}
+            ${profile.push?.enabled && profile.push?.lastStatus === 'error' ? '<span class="badge badge-red no-dot">推送失败</span>' : ''}
           </div>
         </div>
         <div class="profile-actions">
           <button class="icon-btn" data-action="show-qr" data-id="${esc(profile.id)}" title="二维码">${ico('qr')}</button>
           <button class="icon-btn" data-action="copy-profile-link" data-id="${esc(profile.id)}" title="复制订阅链接">${ico('copy')}</button>
+          <button class="icon-btn" data-action="push-profile" data-id="${esc(profile.id)}" title="立即推送">${ico('upload')}</button>
           <button class="icon-btn" data-action="edit-profile" data-id="${esc(profile.id)}" title="编辑">${ico('edit')}</button>
           <button class="icon-btn is-danger" data-action="delete-profile" data-id="${esc(profile.id)}" title="删除">${ico('trash')}</button>
         </div>
@@ -1797,6 +1800,112 @@ function profileFilterTags(profile) {
   return tags;
 }
 
+const PUSH_TYPE_META = {
+  file: { label: '本地文件' },
+  http: { label: 'HTTP 上传' },
+  oss: { label: '对象存储' },
+};
+
+function pushIntervalLabel(minutes) {
+  const m = Number(minutes) || 1440;
+  if (m % 1440 === 0) return `${m / 1440} 天`;
+  if (m % 60 === 0) return `${m / 60} 小时`;
+  return `${m} 分钟`;
+}
+
+function pushTargetFields(target) {
+  const v = (key) => esc(target?.[key] || '');
+  if (target.type === 'file') {
+    return `<div class="field span-2">
+      <label>保存路径</label>
+      <input class="input" data-push-field="path" value="${v('path')}" placeholder="/data/sub/subflux.yaml">
+      <div class="field-hint">写服务器本地文件，目录不存在会自动创建；先写临时文件再替换，避免读到半截内容。</div>
+    </div>`;
+  }
+  if (target.type === 'http') {
+    return `<div class="field span-2">
+      <label>推送地址</label>
+      <input class="input" data-push-field="url" value="${v('url')}" placeholder="https://example.com/upload/subflux.yaml">
+    </div>
+    <div class="field">
+      <label>请求方法</label>
+      <select class="select" data-push-field="method">
+        <option value="PUT" ${(target.method || 'PUT') === 'PUT' ? 'selected' : ''}>PUT</option>
+        <option value="POST" ${target.method === 'POST' ? 'selected' : ''}>POST</option>
+      </select>
+    </div>
+    <div class="field span-2">
+      <label>额外请求头</label>
+      <textarea class="textarea" data-push-field="headers" rows="2" placeholder="Authorization: Bearer xxx">${esc(target.headers || '')}</textarea>
+      <div class="field-hint">每行一个 Header，例如 Authorization: Bearer xxx。</div>
+    </div>`;
+  }
+  return `<div class="field">
+      <label>存储类型</label>
+      <select class="select" data-push-field="provider">
+        <option value="aliyun" ${(target.provider || 'aliyun') === 'aliyun' ? 'selected' : ''}>阿里云 OSS</option>
+        <option value="s3" ${target.provider === 's3' ? 'selected' : ''}>S3 兼容（R2 / MinIO / AWS）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Endpoint</label>
+      <input class="input" data-push-field="endpoint" value="${v('endpoint')}" placeholder="https://oss-cn-hangzhou.aliyuncs.com">
+    </div>
+    <div class="field">
+      <label>Bucket</label>
+      <input class="input" data-push-field="bucket" value="${v('bucket')}" placeholder="my-bucket">
+    </div>
+    <div class="field">
+      <label>Region <span class="tiny dim">（S3 用）</span></label>
+      <input class="input" data-push-field="region" value="${v('region')}" placeholder="auto / us-east-1">
+    </div>
+    <div class="field">
+      <label>AccessKey ID</label>
+      <input class="input" data-push-field="accessKeyId" value="${v('accessKeyId')}" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>AccessKey Secret</label>
+      <input class="input" data-push-field="accessKeySecret" type="password" value="${v('accessKeySecret')}" autocomplete="new-password">
+    </div>
+    <div class="field span-2">
+      <label>对象路径</label>
+      <input class="input" data-push-field="objectKey" value="${v('objectKey')}" placeholder="subflux/my-sub.yaml">
+      <div class="field-hint">阿里云 OSS 走虚拟主机风格；S3 兼容走 path-style（endpoint/bucket/key）。</div>
+    </div>`;
+}
+
+function renderPushTarget(target, index) {
+  const type = PUSH_TYPE_META[target.type] ? target.type : 'file';
+  return `<div class="card card-pad push-target" data-push-index="${index}" data-push-type="${type}" style="margin-bottom:8px">
+    <div class="field-row" style="align-items:center;gap:8px">
+      <select class="select" data-push-type style="max-width:170px">
+        ${Object.entries(PUSH_TYPE_META).map(([id, meta]) => `<option value="${id}" ${type === id ? 'selected' : ''}>${meta.label}</option>`).join('')}
+      </select>
+      <button type="button" class="icon-btn is-danger" data-push-remove title="删除目标">${ico('trash')}</button>
+    </div>
+    <div class="form-grid" style="margin-top:8px">${pushTargetFields({ ...target, type })}</div>
+  </div>`;
+}
+
+function readPushTargets() {
+  return [...document.querySelectorAll('#push-targets .push-target')].map((el) => {
+    const type = el.dataset.pushType;
+    const get = (field) => String(el.querySelector(`[data-push-field="${field}"]`)?.value || '').trim();
+    if (type === 'file') return { type, path: get('path') };
+    if (type === 'http') return { type, url: get('url'), method: get('method') || 'PUT', headers: get('headers') };
+    return {
+      type: 'oss',
+      provider: get('provider') || 'aliyun',
+      endpoint: get('endpoint'),
+      bucket: get('bucket'),
+      region: get('region'),
+      accessKeyId: get('accessKeyId'),
+      accessKeySecret: get('accessKeySecret'),
+      objectKey: get('objectKey'),
+    };
+  });
+}
+
 function openProfileModal(profile = null) {
   const isEdit = Boolean(profile);
   const f = profile?.filters || {
@@ -1804,6 +1913,7 @@ function openProfileModal(profile = null) {
     minQuality: 0, maxLatency: 0, onlyAlive: false, include: '', exclude: '', maxNodes: 500,
   };
   const groups = profile?.groups || { auto: true, fallback: true, regions: true };
+  const push = profile?.push || { enabled: false, intervalMinutes: 1440, targets: [] };
   const allProtocols = new Set(Object.keys(App.state.stats.protocols));
   for (const p of f.protocols || []) allProtocols.add(p);
   if (!allProtocols.size) ['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic'].forEach((p) => allProtocols.add(p));
@@ -1948,6 +2058,34 @@ function openProfileModal(profile = null) {
         </div>
       </div>
 
+      <div class="modal-section-title">定时推送</div>
+      <div class="field-row card card-pad" style="padding:11px 13px">
+        <div>
+          <div class="field-label">启用定时推送</div>
+          <div class="field-hint">到点生成当前订阅并推送到下面的目标；推送失败不会影响订阅本身。</div>
+        </div>
+        <label class="switch"><input type="checkbox" name="pushEnabled" ${push.enabled ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label for="profile-push-interval">推送间隔（分钟）</label>
+          <input class="input" id="profile-push-interval" name="pushInterval" type="number" min="5" max="5256000" value="${Number(push.intervalMinutes) || 1440}">
+          <div class="quick-values">
+            ${[[360, '6 小时'], [720, '12 小时'], [1440, '1 天'], [4320, '3 天'], [10080, '7 天']].map(([m, label]) => `<button type="button" data-push-interval="${m}">${label}</button>`).join('')}
+          </div>
+          <div class="field-hint">上次推送：${push.lastPushAt ? relTime(push.lastPushAt) : '尚未推送'}${push.lastStatus === 'error' ? ' · 上次失败' : ''}</div>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label">推送目标 <span class="tiny dim">（最多 5 个）</span></span>
+        <div id="push-targets"></div>
+        <div class="quick-actions" style="margin-top:8px">
+          <button type="button" class="btn btn-ghost btn-sm" data-push-add="file">${ico('download')}<span>本地文件</span></button>
+          <button type="button" class="btn btn-ghost btn-sm" data-push-add="http">${ico('link')}<span>HTTP 地址</span></button>
+          <button type="button" class="btn btn-ghost btn-sm" data-push-add="oss">${ico('cloud')}<span>OSS</span></button>
+        </div>
+      </div>
+
       <details class="advanced" ${isEdit ? '' : 'open'}>
         <summary>测试地址与高级命名</summary>
         <div class="form-stack">
@@ -1992,6 +2130,42 @@ function openProfileModal(profile = null) {
     subtitle: isEdit ? '调整筛选、分组与客户端格式' : '筛选越精确，最终订阅越干净',
     content,
     size: 'lg',
+  });
+  let pushTargets = Array.isArray(push.targets) ? push.targets.map((t) => ({ ...t })) : [];
+  const pushBox = $('#push-targets');
+  const drawPushTargets = () => {
+    pushBox.innerHTML = pushTargets.length
+      ? pushTargets.map((target, index) => renderPushTarget(target, index)).join('')
+      : '<div class="tiny dim" style="padding:2px 0 4px">还没有推送目标，点下面的按钮添加。</div>';
+  };
+  drawPushTargets();
+  pushBox?.addEventListener('change', (event) => {
+    if (!event.target.matches('[data-push-type]')) return;
+    pushTargets = readPushTargets();
+    const index = Number(event.target.closest('.push-target').dataset.pushIndex);
+    pushTargets[index] = { type: event.target.value };
+    drawPushTargets();
+  });
+  pushBox?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-push-remove]');
+    if (!btn) return;
+    pushTargets = readPushTargets();
+    pushTargets.splice(Number(btn.closest('.push-target').dataset.pushIndex), 1);
+    drawPushTargets();
+  });
+  document.querySelectorAll('[data-push-add]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (pushTargets.length >= 5) return toast('最多添加 5 个推送目标', 'warn');
+      pushTargets = readPushTargets();
+      pushTargets.push({ type: btn.dataset.pushAdd });
+      drawPushTargets();
+    });
+  });
+  document.querySelectorAll('[data-push-interval]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = $('#profile-push-interval');
+      if (input) input.value = btn.dataset.pushInterval;
+    });
   });
   const form = $('#profile-form');
   const range = $('#quality-range');
@@ -2038,8 +2212,22 @@ function openProfileModal(profile = null) {
       appendSites: fd.get('appendSites') === 'on',
       customRuleList: collectRules($('#profile-rule-builder')),
       customRules: '',
+      push: {
+        enabled: fd.get('pushEnabled') === 'on',
+        intervalMinutes: Number(fd.get('pushInterval')) || 1440,
+        targets: readPushTargets(),
+      },
     };
     if (!payload.name) return toast('请填写输出名称', 'warn');
+    if (payload.push.enabled && !payload.push.targets.length) {
+      return toast('启用定时推送前，请先添加至少一个推送目标', 'warn');
+    }
+    const brokenTarget = payload.push.targets.find((target) => {
+      if (target.type === 'file') return !target.path;
+      if (target.type === 'http') return !target.url;
+      return !target.endpoint || !target.bucket || !target.objectKey || !target.accessKeyId || !target.accessKeySecret;
+    });
+    if (brokenTarget) return toast('有推送目标缺少必填项，请检查地址 / Bucket / 对象路径', 'warn');
     App.saving = true;
     setBusy(submit, true);
     try {
@@ -2294,7 +2482,7 @@ function renderSettings() {
               <div class="form-grid">
                 <div class="field">
                   <label for="setting-default-interval">默认刷新间隔（分钟）</label>
-                  <input class="input" id="setting-default-interval" name="defaultInterval" type="number" min="5" max="10080" value="${s.defaultInterval}">
+                  <input class="input" id="setting-default-interval" name="defaultInterval" type="number" min="5" max="5256000" value="${s.defaultInterval}">
                 </div>
                 <div class="field">
                   <label for="setting-ttl">IP 情报缓存（小时）</label>
@@ -2843,6 +3031,23 @@ async function deleteProfile(id) {
   }
 }
 
+async function pushProfileNow(id) {
+  const profile = currentProfile(id);
+  if (!profile) return;
+  if (!profile.push?.targets?.length) return toast('这个订阅还没有配置推送目标，请先编辑添加', 'warn');
+  try {
+    const data = await api(`/api/profiles/${encodeURIComponent(id)}/push`, { method: 'POST' });
+    await refreshState(false);
+    const okCount = (data.results || []).filter((item) => item.ok).length;
+    const total = (data.results || []).length;
+    if (data.ok) return toast(`推送完成：${okCount}/${total} 个目标成功`, 'success');
+    const failed = (data.results || []).filter((item) => !item.ok).map((item) => `${item.label}：${item.error}`).join('；');
+    toast(`部分推送失败：${failed || '未知错误'}`, 'error', 8000);
+  } catch (err) {
+    toast(err.message, 'error', 7000);
+  }
+}
+
 async function rotateProfile(id) {
   const profile = currentProfile(id);
   if (!profile) return;
@@ -2977,6 +3182,7 @@ function bindGlobalEvents() {
     if (action === 'preview-profile') return openProfilePreview(id);
     if (action === 'show-qr') return showQRCode(id);
     if (action === 'rotate-profile') return rotateProfile(id);
+    if (action === 'push-profile') return pushProfileNow(id);
     if (action === 'copy-profile-link') {
       const profile = currentProfile(id);
       if (!profile) return;

@@ -15,6 +15,7 @@ import { normalizeRouting, normalizeRuleList, parseCustomRules } from './lib/rou
 import { CN_DIRECT_COUNT } from './lib/cn-direct.js';
 import { describeEngine } from './lib/engine.js';
 import { refreshSource, isRefreshing, testFetchProxy, nextRunAt } from './lib/refresher.js';
+import { pushProfile } from './lib/pusher.js';
 import { buildOutput, normalizeFormat, profileSummary } from './lib/generator.js';
 import { buildState, nodeQueryFilter, serializeNode, serializeSource, sortNodeList } from './lib/presentation.js';
 import { trafficInfo } from './lib/traffic.js';
@@ -162,7 +163,54 @@ function sanitizeProfile(input, existing, state) {
     ]),
     customRules: '',
     sort,
+    push: sanitizePush(p.push, existing?.push),
     updatedAt: new Date().toISOString(),
+  };
+}
+
+const PUSH_MAX_TARGETS = 5;
+
+function cleanPushTarget(input) {
+  const t = input && typeof input === 'object' ? input : {};
+  const type = ['file', 'http', 'oss'].includes(t.type) ? t.type : '';
+  if (!type) return null;
+  if (type === 'file') return { type, path: String(t.path || '').trim().slice(0, 500) };
+  if (type === 'http') {
+    return {
+      type,
+      url: String(t.url || '').trim().slice(0, 500),
+      method: String(t.method || 'PUT').toUpperCase() === 'POST' ? 'POST' : 'PUT',
+      headers: String(t.headers || '').slice(0, 2000),
+    };
+  }
+  return {
+    type,
+    provider: t.provider === 's3' ? 's3' : 'aliyun',
+    endpoint: String(t.endpoint || '').trim().slice(0, 300),
+    bucket: String(t.bucket || '').trim().slice(0, 120),
+    region: String(t.region || '').trim().slice(0, 60),
+    accessKeyId: String(t.accessKeyId || '').trim().slice(0, 200),
+    accessKeySecret: String(t.accessKeySecret || '').trim().slice(0, 500),
+    objectKey: String(t.objectKey || '').trim().slice(0, 500),
+  };
+}
+
+function sanitizePush(input, existing) {
+  const p = input && typeof input === 'object' ? input : {};
+  const prev = existing && typeof existing === 'object' ? existing : {};
+  const enabled = p.enabled === undefined ? Boolean(prev.enabled) : Boolean(p.enabled);
+  const intervalMinutes = safeInt(p.intervalMinutes ?? prev.intervalMinutes, 1440, 5, 5256000);
+  const rawTargets = Array.isArray(p.targets) ? p.targets : Array.isArray(prev.targets) ? prev.targets : [];
+  const targets = rawTargets.slice(0, PUSH_MAX_TARGETS).map(cleanPushTarget).filter(Boolean);
+  const keepSchedule = prev.enabled && enabled && Number(prev.intervalMinutes) === intervalMinutes && prev.nextPushAt;
+  return {
+    enabled,
+    intervalMinutes,
+    targets,
+    lastPushAt: prev.lastPushAt || null,
+    lastStatus: prev.lastStatus || '',
+    lastResults: Array.isArray(prev.lastResults) ? prev.lastResults.slice(0, 10) : [],
+    nextPushAt: enabled ? (keepSchedule ? prev.nextPushAt : new Date(Date.now() + intervalMinutes * 60000).toISOString()) : null,
   };
 }
 
@@ -230,7 +278,7 @@ async function handleApi(req, res, url) {
       url: urlValue,
       content,
       enabled: body.enabled === undefined ? true : Boolean(body.enabled),
-      intervalMinutes: safeInt(body.intervalMinutes, store.state.settings.defaultInterval, 5, 10080),
+      intervalMinutes: safeInt(body.intervalMinutes, store.state.settings.defaultInterval, 5, 5256000),
       userAgent: String(body.userAgent || '').slice(0, 200),
       ...proxyFields,
       useProxy: proxyFields.proxyMode !== 'direct',
@@ -295,7 +343,7 @@ async function handleApi(req, res, url) {
         source.content = content;
       }
       if (body.enabled !== undefined) source.enabled = Boolean(body.enabled);
-      if (body.intervalMinutes !== undefined) source.intervalMinutes = safeInt(body.intervalMinutes, source.intervalMinutes, 5, 10080);
+      if (body.intervalMinutes !== undefined) source.intervalMinutes = safeInt(body.intervalMinutes, source.intervalMinutes, 5, 5256000);
       if (body.userAgent !== undefined) source.userAgent = String(body.userAgent || '').slice(0, 200);
       let changedProxy = false;
       if (body.proxyMode !== undefined || body.proxyNodeId !== undefined || body.proxyUrl !== undefined || body.useProxy !== undefined) {
@@ -560,7 +608,7 @@ async function handleApi(req, res, url) {
     }
   }
 
-  const profileMatch = pathname.match(/^\/api\/profiles\/([A-Za-z0-9_-]+)(?:\/(preview|rotate))?$/);
+  const profileMatch = pathname.match(/^\/api\/profiles\/([A-Za-z0-9_-]+)(?:\/(preview|rotate|push))?$/);
   if (profileMatch) {
     const profile = findProfile(profileMatch[1]);
     if (!profile) return apiError(res, 404, '输出订阅不存在');
@@ -576,6 +624,18 @@ async function handleApi(req, res, url) {
         ok: true,
         profile: { ...profile, summary: profileSummary(profile, store.state) },
       });
+    }
+
+    if (action === 'push' && method === 'POST') {
+      try {
+        const result = await pushProfile(store, profile, { manual: true });
+        return sendJson(res, 200, {
+          ...result,
+          profile: { ...profile, summary: profileSummary(profile, store.state) },
+        });
+      } catch (err) {
+        return apiError(res, 502, `推送失败：${errMessage(err)}`);
+      }
     }
 
     if (!action && method === 'DELETE') {
@@ -634,7 +694,7 @@ async function handleApi(req, res, url) {
       if (!isHttpUrl(value)) return apiError(res, 400, '测试地址必须是 http(s) URL');
       s.testUrl = value.slice(0, 500);
     }
-    if (body.defaultInterval !== undefined) s.defaultInterval = safeInt(body.defaultInterval, s.defaultInterval, 5, 10080);
+    if (body.defaultInterval !== undefined) s.defaultInterval = safeInt(body.defaultInterval, s.defaultInterval, 5, 5256000);
     if (body.renameTemplate !== undefined) {
       const value = String(body.renameTemplate || '').trim();
       if (!value) return apiError(res, 400, '重命名模板不能为空');
