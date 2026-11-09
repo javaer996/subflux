@@ -2,8 +2,8 @@
 set -eu
 cd "$(dirname "$0")"
 if [ ! -f .subflux.pid ]; then
-  echo "没有 .subflux.pid，尝试按 8888 端口停止"
-  exec sh /data/dsh/tools/bin/stop-serve.sh
+  echo "没有运行中的 SubFlux（缺少 .subflux.pid）"
+  exit 0
 fi
 pid="$(cat .subflux.pid)"
 if kill -0 "$pid" 2>/dev/null; then

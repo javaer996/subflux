@@ -1,13 +1,24 @@
+# Dependencies
 node_modules/
+
+# Runtime data: subscriptions, tokens, node databases
 data/
-.tools/
+server/data/
+
+# Logs and pid files
+*.log
 server.log
+*.pid
 .subflux.pid
-*.tmp
-.validate/
+
+# Runtime binaries (architecture-specific, not distributed)
+server/bin/mihomo
+server/bin/mihomo-*
 bin/mihomo
 bin/mihomo-*
-bin/*.gz
-*.pid
+.validate/
+
+# Local env
 .env
+.env.*
 .DS_Store
