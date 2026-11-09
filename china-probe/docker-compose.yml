@@ -49,7 +49,7 @@ services:
       APP_ENTRY: probe.js
       PROBE_TOKEN: ${PROBE_TOKEN:?请设置 PROBE_TOKEN（至少 16 位）}
       PROBE_PORT: "8899"
-      PROBE_HOST: ${PROBE_HOST:-0.0.0.0}
+      PROBE_HOST: "0.0.0.0"
       PROBE_DATA_DIR: /tmp
       MIHOMO_BIN: /opt/mihomo/mihomo
       MIHOMO_VERSION: ${MIHOMO_VERSION:-1.19.33}
