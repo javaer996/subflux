@@ -2,24 +2,15 @@ import { parseSubscription } from './parser.js';
 import { nodeFingerprint } from './uri.js';
 import { parseTrafficHeader, sha1, errMessage, truncate } from './util.js';
 import { trafficInfo } from './traffic.js';
-import { ProxyAgent, fetch as undiciFetch } from 'undici';
+import { fetch as undiciFetch } from 'undici';
+import { resolveFetchProxy, startUrlProxy } from './node-proxy.js';
 
 const inflight = new Set();
-const proxyAgents = new Map();
 const MAX_BODY = 15 * 1024 * 1024;
 const QUALITY_FIELDS = [
   'ip', 'countryCode', 'country', 'region', 'flag', 'city', 'isp', 'org', 'asn', 'asname',
   'ipType', 'qualityScore', 'qualityLabel', 'qualityNote', 'risk', 'qualityAt',
 ];
-
-function getProxyAgent(url) {
-  let agent = proxyAgents.get(url);
-  if (!agent) {
-    agent = new ProxyAgent(url);
-    proxyAgents.set(url, agent);
-  }
-  return agent;
-}
 
 /**
  * 下一次自动刷新时间。
@@ -33,16 +24,20 @@ export function nextRunAt(source, settings = {}, nowMs = Date.now()) {
   return new Date(nowMs + minutes * 60000).toISOString();
 }
 
-export async function testFetchProxy(url) {
+export async function testFetchProxy(url, settings = {}) {
   const started = performance.now();
-  const agent = getProxyAgent(url);
-  const res = await undiciFetch('https://www.gstatic.com/generate_204', {
-    dispatcher: agent,
-    signal: AbortSignal.timeout(10000),
-    headers: { 'user-agent': 'subflux-proxy-test/1.0' },
-  });
-  await res.arrayBuffer();
-  return { ok: res.ok, status: res.status, latency: Math.round(performance.now() - started) };
+  const proxy = await startUrlProxy(url, settings);
+  try {
+    const res = await undiciFetch('https://www.gstatic.com/generate_204', {
+      dispatcher: proxy.dispatcher,
+      signal: AbortSignal.timeout(15000),
+      headers: { 'user-agent': 'subflux-proxy-test/1.0' },
+    });
+    await res.arrayBuffer();
+    return { ok: res.ok, status: res.status, latency: Math.round(performance.now() - started) };
+  } finally {
+    await proxy.close().catch(() => {});
+  }
 }
 
 export function isRefreshing(sourceId) {
@@ -70,7 +65,7 @@ async function readLimited(res, maxBytes) {
   return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
 }
 
-export async function fetchSubscription(source, settings) {
+export async function fetchSubscription(source, settings, options = {}) {
   if (source.kind === 'text') {
     return {
       text: source.content || '',
@@ -81,31 +76,40 @@ export async function fetchSubscription(source, settings) {
   }
   const timeout = Math.max(5000, Math.min(90000, Number(settings.requestTimeoutMs) || 25000));
   const ua = source.userAgent || settings.userAgent || 'clash.meta/1.19.8';
-  const useProxy = source.useProxy === true && settings.fetchProxy;
-  const request = {
-    redirect: 'follow',
-    headers: {
-      'user-agent': ua,
-      accept: '*/*',
-      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      'cache-control': 'no-cache',
-    },
-    signal: AbortSignal.timeout(timeout),
-    ...(useProxy ? { dispatcher: getProxyAgent(settings.fetchProxy) } : {}),
-  };
-  const res = useProxy ? await undiciFetch(source.url, request) : await fetch(source.url, request);
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText || ''}`.trim());
+  const proxy = await resolveFetchProxy(source, settings, options.nodes || []);
+  try {
+    const request = {
+      redirect: 'follow',
+      headers: {
+        'user-agent': ua,
+        accept: '*/*',
+        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'cache-control': 'no-cache',
+      },
+      signal: AbortSignal.timeout(timeout),
+      ...(proxy ? { dispatcher: proxy.dispatcher } : {}),
+    };
+    let res;
+    try {
+      res = proxy ? await undiciFetch(source.url, request) : await fetch(source.url, request);
+    } catch (err) {
+      throw new Error(proxy ? `通过代理拉取订阅失败：${errMessage(err)}` : errMessage(err));
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText || ''}`.trim());
+    }
+    const length = Number(res.headers.get('content-length') || 0);
+    if (length && length > MAX_BODY) throw new Error('订阅内容超过 15MB 限制');
+    const text = await readLimited(res, MAX_BODY);
+    return {
+      text,
+      headers: Object.fromEntries(res.headers.entries()),
+      finalUrl: res.url,
+      status: res.status,
+    };
+  } finally {
+    if (proxy) await proxy.close().catch(() => {});
   }
-  const length = Number(res.headers.get('content-length') || 0);
-  if (length && length > MAX_BODY) throw new Error('订阅内容超过 15MB 限制');
-  const text = await readLimited(res, MAX_BODY);
-  return {
-    text,
-    headers: Object.fromEntries(res.headers.entries()),
-    finalUrl: res.url,
-    status: res.status,
-  };
 }
 
 function mergeOldState(node, prev, now, source) {
@@ -141,7 +145,7 @@ export async function refreshSource(store, source, deps = {}) {
   source.error = null;
   store.touch();
   try {
-    const fetched = await fetchSubscription(source, state.settings);
+    const fetched = await fetchSubscription(source, state.settings, { nodes: state.nodes });
     const parsed = parseSubscription(fetched.text, {
       maxNodes: state.settings.maxNodesPerSource,
     });

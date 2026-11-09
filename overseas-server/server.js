@@ -127,7 +127,7 @@ function sanitizeFilters(input, state) {
     onlyAlive: Boolean(f.onlyAlive),
     include: String(f.include || '').slice(0, 240),
     exclude: String(f.exclude || '').slice(0, 240),
-    maxNodes: safeInt(f.maxNodes, 500, 1, 5000),
+    maxNodes: safeInt(f.maxNodes, 500, 0, 20000),
   };
 }
 
@@ -217,6 +217,12 @@ async function handleApi(req, res, url) {
     const name = String(body.name || '').trim().slice(0, 40) || (kind === 'url' ? new URL(urlValue).hostname : '手动导入');
     const now = new Date().toISOString();
     const autoRefresh = body.autoRefresh === undefined ? true : Boolean(body.autoRefresh);
+    let proxyFields;
+    try {
+      proxyFields = readProxyFields(body);
+    } catch (err) {
+      return apiError(res, 400, err.message);
+    }
     const source = {
       id: uid(8),
       name,
@@ -226,7 +232,8 @@ async function handleApi(req, res, url) {
       enabled: body.enabled === undefined ? true : Boolean(body.enabled),
       intervalMinutes: safeInt(body.intervalMinutes, store.state.settings.defaultInterval, 5, 10080),
       userAgent: String(body.userAgent || '').slice(0, 200),
-      useProxy: body.useProxy === undefined ? false : Boolean(body.useProxy),
+      ...proxyFields,
+      useProxy: proxyFields.proxyMode !== 'direct',
       autoRefresh,
       status: 'idle',
       error: null,
@@ -290,10 +297,23 @@ async function handleApi(req, res, url) {
       if (body.enabled !== undefined) source.enabled = Boolean(body.enabled);
       if (body.intervalMinutes !== undefined) source.intervalMinutes = safeInt(body.intervalMinutes, source.intervalMinutes, 5, 10080);
       if (body.userAgent !== undefined) source.userAgent = String(body.userAgent || '').slice(0, 200);
-      if (body.useProxy !== undefined) source.useProxy = Boolean(body.useProxy);
+      let changedProxy = false;
+      if (body.proxyMode !== undefined || body.proxyNodeId !== undefined || body.proxyUrl !== undefined || body.useProxy !== undefined) {
+        let proxyFields;
+        try {
+          proxyFields = readProxyFields(body, source);
+        } catch (err) {
+          return apiError(res, 400, err.message);
+        }
+        changedProxy = proxyFields.proxyMode !== (source.proxyMode || 'direct')
+          || proxyFields.proxyNodeId !== (source.proxyNodeId || '')
+          || proxyFields.proxyUrl !== (source.proxyUrl || '');
+        Object.assign(source, proxyFields);
+        source.useProxy = proxyFields.proxyMode !== 'direct';
+      }
       if (body.autoRefresh !== undefined) source.autoRefresh = Boolean(body.autoRefresh);
       source.updatedAt = new Date().toISOString();
-      const refreshNow = source.enabled && (changedUrl || changedContent || source.kind === 'text');
+      const refreshNow = source.enabled && (changedUrl || changedContent || changedProxy || source.kind === 'text');
       if (source.kind === 'text' || source.autoRefresh === false) {
         // 手动内容与关闭自动刷新的源不排期；改了链接仍然立刻抓取一次
         source.nextRefreshAt = null;
@@ -330,7 +350,7 @@ async function handleApi(req, res, url) {
       if (source.kind !== 'url') return apiError(res, 400, '仅 URL 订阅支持预览');
       try {
         const { fetchSubscription } = await import('./lib/refresher.js');
-        const fetched = await fetchSubscription(source, store.state.settings);
+        const fetched = await fetchSubscription(source, store.state.settings, { nodes: store.state.nodes });
         const { parseSubscription } = await import('./lib/parser.js');
         const parsed = parseSubscription(fetched.text, { maxNodes: store.state.settings.maxNodesPerSource });
         return sendJson(res, 200, {
@@ -591,9 +611,9 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/proxy/test' && method === 'POST') {
     const body = await readBody(req);
     const proxyUrl = String(body.url || store.state.settings.fetchProxy || '').trim();
-    if (!/^https?:\/\//i.test(proxyUrl)) return apiError(res, 400, '请输入 http(s) 代理地址');
+    if (!PROXY_URL_RE.test(proxyUrl)) return apiError(res, 400, '请输入 http(s) 或 socks5 代理地址');
     try {
-      const result = await testFetchProxy(proxyUrl);
+      const result = await testFetchProxy(proxyUrl, store.state.settings);
       return sendJson(res, 200, { ok: true, ...result });
     } catch (err) {
       return apiError(res, 502, `代理连接失败：${errMessage(err)}`);
@@ -749,7 +769,11 @@ async function serveSubscription(req, res, url, token, formatPart) {
   const explicit = formatPart || url.searchParams.get('format') || url.searchParams.get('target') || '';
   const detected = detectClientFormat(req.headers['user-agent'], explicit, profile.format);
   const format = detected.format;
-  const result = buildOutput(profile, format, store.state);
+  const limitOverride = safeInt(url.searchParams.get('limit'), 0, 0, 20000);
+  const effective = limitOverride > 0
+    ? { ...profile, filters: { ...(profile.filters || {}), maxNodes: limitOverride } }
+    : profile;
+  const result = buildOutput(effective, format, store.state);
   const sources = [...new Set(result.nodes?.map?.((n) => n.sourceId) || [])];
   let upload = 0;
   let download = 0;
@@ -784,6 +808,28 @@ async function serveSubscription(req, res, url, token, formatPart) {
   }
   res.writeHead(200, headers);
   res.end(result.body);
+}
+
+
+const PROXY_MODES = new Set(['direct', 'pool', 'custom']);
+const PROXY_URL_RE = /^(https?|socks5h?|socks):\/\//i;
+
+/** 归一化订阅源拉取代理设置，兼容旧的 useProxy 布尔字段。 */
+function readProxyFields(body, fallback = {}) {
+  const rawMode = body.proxyMode;
+  const mode = PROXY_MODES.has(rawMode)
+    ? rawMode
+    : (fallback.proxyMode || (body.useProxy === true ? 'custom' : 'direct'));
+  const nodeId = body.proxyNodeId !== undefined
+    ? String(body.proxyNodeId || '').trim().slice(0, 60)
+    : (fallback.proxyNodeId || '');
+  const url = body.proxyUrl !== undefined
+    ? String(body.proxyUrl || '').trim().slice(0, 500)
+    : (fallback.proxyUrl || '');
+  if (url && !PROXY_URL_RE.test(url)) {
+    throw new Error('代理地址需要以 http://、https:// 或 socks5:// 开头');
+  }
+  return { proxyMode: mode, proxyNodeId: nodeId, proxyUrl: url };
 }
 
 const server = http.createServer(async (req, res) => {

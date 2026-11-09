@@ -155,9 +155,9 @@ export function matchNodes(profile, state) {
   const beforeDedupe = filtered.length;
   const deduped = dedupeNodes(filtered);
   const sorted = sortNodes(deduped, profile.sort || 'quality');
-  const max = safeInt(f.maxNodes, 500, 1, 10000);
-  const limited = sorted.slice(0, max);
-  if (sorted.length > max) warnings.push(`匹配 ${sorted.length} 个节点，按配置上限保留前 ${max} 个`);
+  const max = safeInt(f.maxNodes, 500, 0, 20000);
+  const limited = max > 0 ? sorted.slice(0, max) : sorted;
+  if (max > 0 && sorted.length > max) warnings.push(`匹配 ${sorted.length} 个节点，按配置上限保留前 ${max} 个`);
   const nodes = nameNodes(
     limited,
     profile.renameTemplate || state.settings.renameTemplate,

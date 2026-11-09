@@ -913,7 +913,7 @@ function sourceCard(source) {
             ${statusPill(source)}
             <span class="badge badge-muted no-dot">${source.kind === 'text' ? '手动导入' : (source.format ? esc(source.format) : '待解析')}</span>
             ${manualOnly && source.kind !== 'text' ? '<span class="badge badge-amber">仅手动刷新</span>' : ''}
-            ${source.useProxy ? '<span class="badge badge-blue">代理拉取</span>' : ''}
+            ${source.proxyMode === 'pool' ? '<span class="badge badge-blue">代理拉取 · 节点池</span>' : (source.proxyMode === 'custom' || source.useProxy) ? '<span class="badge badge-blue">代理拉取 · 外部</span>' : ''}
           </div>
         </div>
         <div class="source-actions">
@@ -960,6 +960,7 @@ function openSourceModal(source = null) {
   const kind = source?.kind || 'url';
   const interval = source?.intervalMinutes || App.state.settings.defaultInterval || 360;
   const autoRefresh = source ? source.autoRefresh !== false : true;
+  const proxyMode = source?.proxyMode || (source?.useProxy ? 'custom' : 'direct');
   const quick = [30, 60, 180, 360, 720, 1440];
   const content = `
     <form id="source-form" autocomplete="off">
@@ -1016,6 +1017,28 @@ function openSourceModal(source = null) {
         </div>
         <label class="switch"><input type="checkbox" name="autoRefresh" ${autoRefresh ? 'checked' : ''}><span class="track"></span></label>
       </div>`}
+      <div class="field" id="source-proxy-section" ${kind === 'text' ? 'style="display:none"' : ''}>
+        <label for="source-proxy-mode">拉取方式</label>
+        <select class="input" id="source-proxy-mode" name="proxyMode">
+          <option value="direct" ${proxyMode === 'direct' ? 'selected' : ''}>直连（服务器直接请求订阅站）</option>
+          <option value="pool" ${proxyMode === 'pool' ? 'selected' : ''}>使用节点池中的节点</option>
+          <option value="custom" ${proxyMode === 'custom' ? 'selected' : ''}>外部代理地址</option>
+        </select>
+        <div class="field-hint">订阅站被墙、限制 IP 或需要固定出口时，可让抓取请求走已有节点或本地代理。</div>
+      </div>
+      <div class="field" id="source-proxy-pool-row" style="display:none">
+        <label for="source-proxy-node">拉取出口节点</label>
+        <div class="form-grid">
+          <input class="input" id="source-proxy-search" placeholder="搜索节点名 / 地区">
+          <select class="input" id="source-proxy-node" name="proxyNodeId"></select>
+        </div>
+        <div class="field-hint" id="source-proxy-node-hint">按质量排序显示前 200 个节点，输入关键词可搜索全部。</div>
+      </div>
+      <div class="field" id="source-proxy-custom-row" style="display:none">
+        <label for="source-proxy-url">代理地址</label>
+        <input class="input" id="source-proxy-url" name="proxyUrl" value="${esc(source?.proxyUrl || '')}" placeholder="${esc(App.state.settings.fetchProxy || 'http://127.0.0.1:7890 或 socks5://127.0.0.1:1080')}">
+        <div class="field-hint">支持 http / https / socks5；留空则使用全局「订阅拉取代理」${App.state.settings.fetchProxy ? `：${esc(App.state.settings.fetchProxy)}` : '（尚未配置）'}。</div>
+      </div>
       <details class="advanced">
         <summary>高级选项</summary>
         <div class="form-stack">
@@ -1023,10 +1046,6 @@ function openSourceModal(source = null) {
             <label for="source-ua">自定义 User-Agent</label>
             <input class="input" id="source-ua" name="userAgent" maxlength="200" placeholder="留空使用全局默认：${esc(App.state.settings.userAgent)}" value="${esc(source?.userAgent || '')}">
             <div class="field-hint">部分服务商根据 UA 返回 Clash、Sing-box 或 Base64 格式。</div>
-          </div>
-          <div class="field-row card card-pad" style="padding:11px 13px">
-            <div><div class="field-label">通过代理拉取</div><div class="field-hint">使用「设置 → 订阅拉取代理」${App.state.settings.fetchProxy ? `：${esc(App.state.settings.fetchProxy)}` : '（尚未配置）'}</div></div>
-            <label class="switch"><input type="checkbox" name="useProxy" ${source?.useProxy ? 'checked' : ''}><span class="track"></span></label>
           </div>
           <div class="field">
             <div class="field-hint">单源节点上限由「设置 → 单源节点上限」控制，当前为 ${App.state.settings.maxNodesPerSource} 个。</div>
@@ -1058,6 +1077,8 @@ function openSourceModal(source = null) {
     if (textField) textField.style.display = next === 'text' ? '' : 'none';
     const autoRow = document.getElementById('source-auto-row');
     if (autoRow) autoRow.style.display = next === 'url' ? '' : 'none';
+    const proxySection = document.getElementById('source-proxy-section');
+    if (proxySection) proxySection.style.display = next === 'url' ? '' : 'none';
     const urlInput = $('#source-url');
     const textInput = $('#source-content');
     if (urlInput) urlInput.required = next === 'url';
@@ -1085,6 +1106,49 @@ function openSourceModal(source = null) {
   };
   autoToggle?.addEventListener('change', syncAutoRefresh);
   syncAutoRefresh();
+  const proxyModeSel = $('#source-proxy-mode');
+  const proxyPoolRow = $('#source-proxy-pool-row');
+  const proxyCustomRow = $('#source-proxy-custom-row');
+  const proxyNodeSel = $('#source-proxy-node');
+  const proxySearch = $('#source-proxy-search');
+  let proxyNodes = [];
+  const renderProxyNodes = (keyword = '') => {
+    if (!proxyNodeSel) return;
+    const kw = keyword.trim().toLowerCase();
+    const list = kw
+      ? proxyNodes.filter((n) => `${n.name} ${n.region || ''} ${n.isp || ''}`.toLowerCase().includes(kw))
+      : proxyNodes;
+    const current = proxyNodeSel.value || source?.proxyNodeId || '';
+    proxyNodeSel.innerHTML = list.length
+      ? list.map((n) => `<option value="${esc(n.id)}" ${n.id === current ? 'selected' : ''}>${esc(n.name)}${n.region ? ` · ${esc(n.region)}` : ''}</option>`).join('')
+      : '<option value="">没有匹配的节点</option>';
+  };
+  const loadProxyNodes = async (keyword = '') => {
+    if (!proxyNodeSel) return;
+    try {
+      const params = new URLSearchParams({ pageSize: '200', status: 'all', sort: 'quality' });
+      if (keyword.trim()) params.set('q', keyword.trim());
+      const data = await api(`/api/nodes?${params.toString()}`);
+      proxyNodes = data.items || [];
+      renderProxyNodes('');
+    } catch {
+      proxyNodeSel.innerHTML = '<option value="">节点加载失败</option>';
+    }
+  };
+  const syncProxyMode = () => {
+    const mode = proxyModeSel?.value || 'direct';
+    if (proxyPoolRow) proxyPoolRow.style.display = mode === 'pool' ? '' : 'none';
+    if (proxyCustomRow) proxyCustomRow.style.display = mode === 'custom' ? '' : 'none';
+    if (mode === 'pool' && !proxyNodes.length) loadProxyNodes('');
+  };
+  proxyModeSel?.addEventListener('change', syncProxyMode);
+  proxySearch?.addEventListener('input', debounce((event) => {
+    const keyword = String(event.target.value || '').trim();
+    if (keyword.length >= 2) loadProxyNodes(keyword);
+    else renderProxyNodes(keyword);
+  }, 320));
+  syncProxyMode();
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const submit = $('#source-submit');
@@ -1097,7 +1161,9 @@ function openSourceModal(source = null) {
       intervalMinutes: intervalValue,
       autoRefresh: selectedKind === 'text' ? true : autoOn,
       userAgent: String(fd.get('userAgent') || ''),
-      useProxy: fd.get('useProxy') === 'on',
+      proxyMode: selectedKind === 'url' ? (proxyModeSel?.value || 'direct') : 'direct',
+      proxyNodeId: selectedKind === 'url' && proxyModeSel?.value === 'pool' ? String(fd.get('proxyNodeId') || '') : '',
+      proxyUrl: selectedKind === 'url' && proxyModeSel?.value === 'custom' ? String(fd.get('proxyUrl') || '').trim() : '',
       enabled: fd.get('enabled') === 'on',
     };
     if (selectedKind === 'url') payload.url = String(fd.get('url') || '').trim();
@@ -1105,6 +1171,8 @@ function openSourceModal(source = null) {
     if (!payload.name) return toast('请填写订阅名称', 'warn');
     if (selectedKind === 'url' && !/^https?:\/\//i.test(payload.url)) return toast('请输入有效的 http(s) 订阅链接', 'warn');
     if (selectedKind === 'text' && !payload.content) return toast('请粘贴节点内容', 'warn');
+    if (payload.proxyMode === 'pool' && !payload.proxyNodeId) return toast('请选择一个节点作为拉取出口', 'warn');
+    if (payload.proxyMode === 'custom' && !payload.proxyUrl && !App.state.settings.fetchProxy) return toast('请填写外部代理地址', 'warn');
     setBusy(submit, true);
     try {
       const data = await api(isEdit ? `/api/sources/${encodeURIComponent(source.id)}` : '/api/sources', {
@@ -1648,7 +1716,7 @@ function profileCard(profile) {
           <div class="sub">自动识别客户端 · 回退 ${esc(meta.label)} · 更新于 ${relTime(profile.updatedAt)}</div>
           <div class="source-badge-stack">
             ${profile.needsReview ? '<span class="badge badge-amber">需复核</span>' : profile.enabled ? '<span class="badge badge-mint">已启用</span>' : '<span class="badge badge-muted">已停用</span>'}
-            <span class="badge badge-muted no-dot">上限 ${profile.filters.maxNodes || 500}</span>
+            <span class="badge badge-muted no-dot">${Number(profile.filters.maxNodes) > 0 ? `上限 ${profile.filters.maxNodes}` : '不限数量'}</span>
           </div>
         </div>
         <div class="profile-actions">
@@ -1836,7 +1904,8 @@ function openProfileModal(profile = null) {
       <div class="form-grid">
         <div class="field">
           <label for="profile-max">最多输出节点</label>
-          <input class="input" id="profile-max" name="maxNodes" type="number" min="1" max="5000" value="${Number(f.maxNodes) || 500}">
+          <input class="input" id="profile-max" name="maxNodes" type="number" min="0" max="20000" value="${Number.isFinite(Number(f.maxNodes)) ? Number(f.maxNodes) : 500}">
+          <div class="field-hint">按排序保留前 N 个；填 0 表示不限制。也可以在订阅链接后加 ?limit=100 临时覆盖。</div>
         </div>
         <div class="field">
           <label>只保留 TCP 可达节点</label>
@@ -1946,7 +2015,11 @@ function openProfileModal(profile = null) {
         onlyAlive: fd.get('onlyAlive') === 'on',
         include: String(fd.get('include') || ''),
         exclude: String(fd.get('exclude') || ''),
-        maxNodes: Number(fd.get('maxNodes')) || 500,
+        maxNodes: (() => {
+          const raw = String(fd.get('maxNodes') ?? '').trim();
+          if (raw === '') return 0;
+          return Math.max(0, Math.min(20000, Math.round(Number(raw) || 0)));
+        })(),
       },
       groups: {
         auto: fd.get('groupAuto') === 'on',
@@ -2248,12 +2321,12 @@ function renderSettings() {
                   <label class="switch"><input type="checkbox" name="autoSite" ${s.autoSite !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
                 <div class="field" style="grid-column:span 2">
-                  <label for="setting-fetch-proxy">订阅拉取代理</label>
+                  <label for="setting-fetch-proxy">默认订阅拉取代理</label>
                   <div style="display:flex;gap:8px">
-                    <input class="input" id="setting-fetch-proxy" name="fetchProxy" value="${esc(s.fetchProxy || '')}" placeholder="http://127.0.0.1:7890">
+                    <input class="input" id="setting-fetch-proxy" name="fetchProxy" value="${esc(s.fetchProxy || '')}" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080">
                     <button type="button" class="btn btn-ghost" data-action="test-proxy" style="white-space:nowrap">${ico('activity')}<span>测试</span></button>
                   </div>
-                  <div class="field-hint">支持 HTTP / HTTPS 代理（不支持 SOCKS URL）；启用来源的「通过代理拉取」后生效。</div>
+                  <div class="field-hint">支持 HTTP / HTTPS / SOCKS5；订阅源选择「外部代理地址」且地址留空时使用这里。也可以在订阅源里直接用节点池节点拉取。</div>
                 </div>
                 <div class="field-row card card-pad" style="padding:11px 13px;grid-column:span 2">
                   <div><div class="field-label">流量耗尽 / 过期时剔除节点</div><div class="field-hint">根据订阅响应的 Subscription-Userinfo 判断；关闭后即使耗尽也继续输出</div></div>
@@ -2861,7 +2934,7 @@ function bindGlobalEvents() {
     if (action === 'test-china-link') return checkChinaLink(actionEl);
     if (action === 'test-proxy') {
       const url = String($('#setting-fetch-proxy')?.value || '').trim();
-      if (!url) return toast('请先填写 HTTP/HTTPS 代理地址', 'warn');
+      if (!url) return toast('请先填写代理地址', 'warn');
       setBusy(actionEl, true);
       try {
         const result = await api('/api/proxy/test', { method: 'POST', body: JSON.stringify({ url }) });
