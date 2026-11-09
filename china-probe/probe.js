@@ -19,6 +19,9 @@ const HOST = process.env.PROBE_HOST || '0.0.0.0';
 const TOKEN = process.env.PROBE_TOKEN || '';
 const MIHOMO_BIN = process.env.MIHOMO_BIN || 'mihomo';
 const DATA_ROOT = process.env.PROBE_DATA_DIR || os.tmpdir();
+try {
+  fs.mkdirSync(DATA_ROOT, { recursive: true });
+} catch {}
 const MAX_BODY = 2 * 1024 * 1024;
 const MAX_PROXY_NODES = 100;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
