@@ -55,8 +55,8 @@ curl http://100.x.y.z:8899/health     # {"ok":true,"probe":"china",...}
 更新代码和重启：
 
 ```bash
-docker compose run --rm sources       # 重新拉取 GitHub 代码
-docker compose up -d probe            # 重启；依赖为 0，Mihomo 直接复用
+docker compose run --rm sources   # 重新拉取 GitHub 代码
+docker compose restart probe      # 重启；无依赖要装，Mihomo 直接复用
 ```
 
 GitHub 下载慢时设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com`，或 `MIHOMO_URL` 给完整 `.gz` 直链。

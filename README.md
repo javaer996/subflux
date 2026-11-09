@@ -74,9 +74,11 @@ docker compose down               # 停止；加 -v 会连代码卷一起删，�
 改了代码后要更新部署：
 
 ```bash
-docker compose run --rm sources    # 重新拉取代码
-docker compose up -d app           # 重启应用
+docker compose run --rm sources    # 重新拉取代码（一次性任务，不删缓存）
+docker compose restart app         # 重启加载新代码；依赖与 Mihomo 命中宿主机缓存
 ```
+
+也可以直接 `docker compose up -d`：它会重新跑一遍 `sources` 同步代码，但 `app` 已在运行不会自动重启，之后仍需 `docker compose restart app`。
 
 `REPO_URL` 可以换成自己的 fork；私有仓库用 `https://<token>@github.com/...` 或把 SSH key 挂进 `sources`。GitHub 下载 Mihomo 慢时设 `MIHOMO_MIRROR=https://ghfast.top/https://github.com` 或直接给 `MIHOMO_URL` 完整 `.gz` 直链。
 
