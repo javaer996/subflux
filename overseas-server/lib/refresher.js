@@ -21,6 +21,18 @@ function getProxyAgent(url) {
   return agent;
 }
 
+/**
+ * 下一次自动刷新时间。
+ * - 手动粘贴的内容（kind=text）不会自动刷新，返回 null
+ * - autoRefresh === false 的订阅源同样不排期，返回 null
+ */
+export function nextRunAt(source, settings = {}, nowMs = Date.now()) {
+  if (!source || source.kind === 'text') return null;
+  if (source.autoRefresh === false) return null;
+  const minutes = Math.max(5, Number(source.intervalMinutes) || settings.defaultInterval || 360);
+  return new Date(nowMs + minutes * 60000).toISOString();
+}
+
 export async function testFetchProxy(url) {
   const started = performance.now();
   const agent = getProxyAgent(url);
@@ -173,9 +185,7 @@ export async function refreshSource(store, source, deps = {}) {
     source.error = null;
     source.lastRefreshAt = now;
     source.lastSuccessAt = now;
-    source.nextRefreshAt = source.kind === 'text'
-      ? null
-      : new Date(nowMs + Math.max(5, Number(source.intervalMinutes) || state.settings.defaultInterval) * 60000).toISOString();
+    source.nextRefreshAt = nextRunAt(source, state.settings, nowMs);
     source.nodeCount = nodes.length;
     source.format = parsed.format;
     source.warnings = parsed.warnings || [];
@@ -207,9 +217,7 @@ export async function refreshSource(store, source, deps = {}) {
     source.error = truncate(message, 400);
     source.lastRefreshAt = new Date().toISOString();
     source.lastErrorAt = source.lastRefreshAt;
-    source.nextRefreshAt = source.kind === 'text'
-      ? null
-      : new Date(Date.now() + Math.max(5, Number(source.intervalMinutes) || state.settings.defaultInterval) * 60000).toISOString();
+    source.nextRefreshAt = nextRunAt(source, state.settings, Date.now());
     source.lastDurationMs = Date.now() - started;
     store.addEvent('error', `${source.name} 刷新失败：${source.error}`, { sourceId: source.id });
     store.touch();

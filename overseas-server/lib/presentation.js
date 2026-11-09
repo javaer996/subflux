@@ -14,6 +14,7 @@ export function serializeSource(source, settings) {
     url: source.url || '',
     enabled: source.enabled,
     intervalMinutes: source.intervalMinutes,
+    autoRefresh: source.autoRefresh !== false,
     userAgent: source.userAgent || '',
     useProxy: Boolean(source.useProxy),
     status: source.status,

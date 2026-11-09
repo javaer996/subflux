@@ -14,7 +14,7 @@ import { detectClientFormat } from './lib/clients.js';
 import { normalizeSites } from './lib/sites.js';
 import { normalizeRouting, normalizeRuleList, parseCustomRules } from './lib/routing.js';
 import { CN_DIRECT_COUNT } from './lib/cn-direct.js';
-import { refreshSource, isRefreshing, testFetchProxy } from './lib/refresher.js';
+import { refreshSource, isRefreshing, testFetchProxy, nextRunAt } from './lib/refresher.js';
 import { buildOutput, normalizeFormat, profileSummary } from './lib/generator.js';
 import { buildState, nodeQueryFilter, serializeNode, serializeSource, sortNodeList } from './lib/presentation.js';
 import { trafficInfo } from './lib/traffic.js';
@@ -216,6 +216,7 @@ async function handleApi(req, res, url) {
     }
     const name = String(body.name || '').trim().slice(0, 40) || (kind === 'url' ? new URL(urlValue).hostname : '手动导入');
     const now = new Date().toISOString();
+    const autoRefresh = body.autoRefresh === undefined ? true : Boolean(body.autoRefresh);
     const source = {
       id: uid(8),
       name,
@@ -226,6 +227,7 @@ async function handleApi(req, res, url) {
       intervalMinutes: safeInt(body.intervalMinutes, store.state.settings.defaultInterval, 5, 10080),
       userAgent: String(body.userAgent || '').slice(0, 200),
       useProxy: body.useProxy === undefined ? false : Boolean(body.useProxy),
+      autoRefresh,
       status: 'idle',
       error: null,
       warnings: [],
@@ -236,7 +238,7 @@ async function handleApi(req, res, url) {
       updatedAt: now,
       lastRefreshAt: null,
       lastSuccessAt: null,
-      nextRefreshAt: kind === 'text' ? null : now,
+      nextRefreshAt: kind === 'text' || autoRefresh === false ? null : now,
     };
     store.state.sources.push(source);
     store.addEvent('info', `已添加订阅源「${source.name}」`, { sourceId: source.id });
@@ -289,14 +291,20 @@ async function handleApi(req, res, url) {
       if (body.intervalMinutes !== undefined) source.intervalMinutes = safeInt(body.intervalMinutes, source.intervalMinutes, 5, 10080);
       if (body.userAgent !== undefined) source.userAgent = String(body.userAgent || '').slice(0, 200);
       if (body.useProxy !== undefined) source.useProxy = Boolean(body.useProxy);
+      if (body.autoRefresh !== undefined) source.autoRefresh = Boolean(body.autoRefresh);
       source.updatedAt = new Date().toISOString();
-      if (source.enabled) {
-        if (changedUrl || changedContent) source.nextRefreshAt = new Date().toISOString();
-        if (!source.nextRefreshAt) source.nextRefreshAt = new Date().toISOString();
+      const refreshNow = source.enabled && (changedUrl || changedContent || source.kind === 'text');
+      if (source.kind === 'text' || source.autoRefresh === false) {
+        // 手动内容与关闭自动刷新的源不排期；改了链接仍然立刻抓取一次
+        source.nextRefreshAt = null;
+      } else if (refreshNow) {
+        source.nextRefreshAt = new Date().toISOString();
+      } else if (!source.nextRefreshAt) {
+        source.nextRefreshAt = nextRunAt(source, store.state.settings);
       }
       store.addEvent('info', `已更新订阅源「${source.name}」`, { sourceId: source.id });
       await store.flush();
-      if (source.enabled && (changedUrl || changedContent || source.kind === 'text')) {
+      if (refreshNow) {
         setTimeout(() => {
           refreshSource(store, source, { tester, siteTester }).catch(() => {});
         }, 150).unref?.();

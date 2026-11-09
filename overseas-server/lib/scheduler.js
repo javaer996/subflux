@@ -16,9 +16,10 @@ export class Scheduler {
     // Recover sources left in a transient state by a previous process.
     for (const source of this.store.state.sources) {
       if (source.status === 'refreshing') source.status = 'idle';
-      if (source.enabled && source.kind !== 'text' && !source.nextRefreshAt) {
+      if (source.enabled && source.kind !== 'text' && source.autoRefresh !== false && !source.nextRefreshAt) {
         source.nextRefreshAt = new Date(Date.now() + 3000).toISOString();
       }
+      if (source.autoRefresh === false) source.nextRefreshAt = null;
     }
     this.store.touch();
     setTimeout(() => this.tick(), 1600).unref?.();
@@ -38,7 +39,7 @@ export class Scheduler {
     try {
       const now = Date.now();
       const due = this.store.state.sources
-        .filter((s) => s.enabled && s.kind !== 'text' && !isRefreshing(s.id))
+        .filter((s) => s.enabled && s.kind !== 'text' && s.autoRefresh !== false && !isRefreshing(s.id))
         .filter((s) => {
           if (!s.nextRefreshAt) return true;
           return new Date(s.nextRefreshAt).getTime() <= now;
@@ -56,7 +57,10 @@ export class Scheduler {
   async refreshAll() {
     const list = this.store.state.sources.filter((s) => s.enabled && !isRefreshing(s.id));
     for (const source of list) {
-      source.nextRefreshAt = new Date(0).toISOString();
+      // 关闭自动刷新的源只在手动触发时刷新，不写回排期
+      if (source.autoRefresh !== false && source.kind !== 'text') {
+        source.nextRefreshAt = new Date(0).toISOString();
+      }
     }
     this.store.touch();
     const results = [];

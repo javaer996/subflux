@@ -164,6 +164,7 @@ export class Store extends EventEmitter {
     state.sources = state.sources.map((s) => ({
       kind: 'url',
       enabled: true,
+      autoRefresh: true,
       intervalMinutes: state.settings.defaultInterval,
       userAgent: '',
       useProxy: false,

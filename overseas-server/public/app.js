@@ -667,9 +667,10 @@ function renderOverview() {
 
 function overviewSourceRow(source) {
   const traffic = source.traffic || {};
+  const manual = source.kind === 'text' || source.autoRefresh === false;
   const meta = [
     `${source.nodeCount || 0} 节点`,
-    `${source.intervalMinutes || 0} 分钟`,
+    manual ? '手动刷新' : `${source.intervalMinutes || 0} 分钟`,
     source.lastRefreshAt ? `${relTime(source.lastRefreshAt)}刷新` : '尚未刷新',
   ];
   const pct = traffic.total > 0 ? Math.min(100, traffic.percent || 0) : 0;
@@ -681,6 +682,7 @@ function overviewSourceRow(source) {
           <strong>${esc(source.name)}</strong>
           ${statusPill(source)}
           ${source.kind === 'text' ? '<span class="badge badge-violet no-dot">手动</span>' : ''}
+          ${source.kind !== 'text' && source.autoRefresh === false ? '<span class="badge badge-amber no-dot">仅手动刷新</span>' : ''}
         </div>
         <div class="source-url">${esc(prettyUrl(source.url))}</div>
         <div class="source-meta-line">${meta.map((m) => `<span>${esc(m)}</span>`).join('<span class="sep"></span>')}</div>
@@ -890,7 +892,14 @@ function sourceCard(source) {
   const pct = traffic.total > 0 ? Math.min(100, traffic.percent || 0) : 0;
   const trackClass = traffic.percent >= 95 ? 'is-danger' : traffic.percent >= 80 ? 'is-warn' : '';
   const statusClass = source.status === 'refreshing' ? 'is-loading' : '';
-  const next = source.nextRefreshAt ? relTime(source.nextRefreshAt) : source.kind === 'text' ? '静态内容' : '未安排';
+  const manualOnly = source.autoRefresh === false;
+  const next = source.nextRefreshAt
+    ? relTime(source.nextRefreshAt)
+    : source.kind === 'text'
+      ? '静态内容'
+      : manualOnly
+        ? '仅手动'
+        : '未安排';
   return `
     <article class="card source-card">
       <div class="source-card-head">
@@ -901,6 +910,7 @@ function sourceCard(source) {
           <div class="source-badge-stack">
             ${statusPill(source)}
             <span class="badge badge-muted no-dot">${source.kind === 'text' ? '手动导入' : (source.format ? esc(source.format) : '待解析')}</span>
+            ${manualOnly && source.kind !== 'text' ? '<span class="badge badge-amber">仅手动刷新</span>' : ''}
             ${source.useProxy ? '<span class="badge badge-blue">代理拉取</span>' : ''}
           </div>
         </div>
@@ -914,7 +924,7 @@ function sourceCard(source) {
       <div class="source-card-body">
         <div class="source-stat-grid">
           <div class="source-stat"><span>节点</span><b>${fmtNum(source.nodeCount)}</b></div>
-          <div class="source-stat"><span>周期</span><b>${source.kind === 'text' ? '手动' : `${source.intervalMinutes} 分`}</b></div>
+          <div class="source-stat"><span>周期</span><b>${source.kind === 'text' || manualOnly ? '手动' : `${source.intervalMinutes} 分`}</b></div>
           <div class="source-stat"><span>下次</span><b>${esc(next)}</b></div>
         </div>
         <div>
@@ -947,6 +957,7 @@ function openSourceModal(source = null) {
   const isEdit = Boolean(source);
   const kind = source?.kind || 'url';
   const interval = source?.intervalMinutes || App.state.settings.defaultInterval || 360;
+  const autoRefresh = source ? source.autoRefresh !== false : true;
   const quick = [30, 60, 180, 360, 720, 1440];
   const content = `
     <form id="source-form" autocomplete="off">
@@ -981,10 +992,11 @@ function openSourceModal(source = null) {
       <div class="form-grid">
         <div class="field">
           <label for="source-interval">刷新间隔（分钟）</label>
-          <input class="input" id="source-interval" name="intervalMinutes" type="number" min="5" max="10080" step="5" value="${esc(interval)}">
+          <input class="input" id="source-interval" name="intervalMinutes" type="number" min="5" max="10080" step="5" value="${esc(interval)}" ${autoRefresh ? '' : 'disabled'}>
           <div class="quick-values">
             ${quick.map((m) => `<button type="button" data-interval-value="${m}">${m < 60 ? `${m} 分` : `${m / 60} 小时`}</button>`).join('')}
           </div>
+          <div class="field-hint" id="source-manual-hint" ${autoRefresh ? 'style="display:none"' : ''}>已关闭自动刷新，只在你点「刷新」时抓取；间隔设置暂不生效。</div>
         </div>
         <div class="field">
           <label>启用状态</label>
@@ -994,6 +1006,14 @@ function openSourceModal(source = null) {
           </div>
         </div>
       </div>
+      ${kind === 'text' ? '' : `
+      <div class="field-row card card-pad" id="source-auto-row" style="padding:11px 13px">
+        <div>
+          <div class="field-label">自动刷新</div>
+          <div class="field-hint">关闭后不会按周期抓取，只能手动刷新（仍会在添加时抓取一次）</div>
+        </div>
+        <label class="switch"><input type="checkbox" name="autoRefresh" ${autoRefresh ? 'checked' : ''}><span class="track"></span></label>
+      </div>`}
       <details class="advanced">
         <summary>高级选项</summary>
         <div class="form-stack">
@@ -1028,15 +1048,19 @@ function openSourceModal(source = null) {
   const urlField = $('#source-url-field');
   const textField = $('#source-text-field');
   let selectedKind = kind;
+  let syncAutoRefresh = () => {};
   const setKind = (next) => {
     selectedKind = next;
     tabs?.querySelectorAll('[data-source-kind]').forEach((b) => b.classList.toggle('active', b.dataset.sourceKind === next));
     if (urlField) urlField.style.display = next === 'url' ? '' : 'none';
     if (textField) textField.style.display = next === 'text' ? '' : 'none';
+    const autoRow = document.getElementById('source-auto-row');
+    if (autoRow) autoRow.style.display = next === 'url' ? '' : 'none';
     const urlInput = $('#source-url');
     const textInput = $('#source-content');
     if (urlInput) urlInput.required = next === 'url';
     if (textInput) textInput.required = next === 'text';
+    syncAutoRefresh();
   };
   setKind(kind);
   tabs?.addEventListener('click', (event) => {
@@ -1049,14 +1073,27 @@ function openSourceModal(source = null) {
       if (input) input.value = btn.dataset.intervalValue;
     });
   });
+  const autoToggle = form.querySelector('input[name="autoRefresh"]');
+  syncAutoRefresh = () => {
+    const manual = selectedKind === 'text' || !(autoToggle ? autoToggle.checked : true);
+    const input = $('#source-interval');
+    if (input) input.disabled = manual;
+    const hint = $('#source-manual-hint');
+    if (hint) hint.style.display = manual ? '' : 'none';
+  };
+  autoToggle?.addEventListener('change', syncAutoRefresh);
+  syncAutoRefresh();
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const submit = $('#source-submit');
     const fd = new FormData(form);
+    const autoOn = fd.get('autoRefresh') === 'on';
+    const intervalValue = Number($('#source-interval')?.value) || interval;
     const payload = {
       name: String(fd.get('name') || '').trim(),
       kind: selectedKind,
-      intervalMinutes: Number(fd.get('intervalMinutes')) || 360,
+      intervalMinutes: intervalValue,
+      autoRefresh: selectedKind === 'text' ? true : autoOn,
       userAgent: String(fd.get('userAgent') || ''),
       useProxy: fd.get('useProxy') === 'on',
       enabled: fd.get('enabled') === 'on',
