@@ -435,6 +435,9 @@ async function handleApi(req, res, url) {
       const body = await readBody(req);
       const changedUrl = body.url !== undefined && body.url !== source.url;
       const changedContent = body.content !== undefined && body.content !== source.content;
+      const prevInterval = source.intervalMinutes;
+      const prevAutoRefresh = source.autoRefresh !== false;
+      const prevEnabled = source.enabled !== false;
       if (body.name !== undefined) {
         const oldName = source.name;
         source.name = String(body.name).trim().slice(0, 40) || source.name;
@@ -476,12 +479,16 @@ async function handleApi(req, res, url) {
       if (body.autoRefresh !== undefined) source.autoRefresh = Boolean(body.autoRefresh);
       source.updatedAt = new Date().toISOString();
       const refreshNow = source.enabled && (changedUrl || changedContent || changedProxy || source.kind === 'text');
+      const intervalChanged = source.intervalMinutes !== prevInterval;
+      const autoChanged = (source.autoRefresh !== false) !== prevAutoRefresh;
+      const enabledChanged = (source.enabled !== false) !== prevEnabled;
       if (source.kind === 'text' || source.autoRefresh === false) {
         // 手动内容与关闭自动刷新的源不排期；改了链接仍然立刻抓取一次
         source.nextRefreshAt = null;
       } else if (refreshNow) {
         source.nextRefreshAt = new Date().toISOString();
-      } else if (!source.nextRefreshAt) {
+      } else if (intervalChanged || autoChanged || enabledChanged || !source.nextRefreshAt) {
+        // 改了间隔 / 重新开启自动刷新或启用源时，按新间隔从现在重新排期
         source.nextRefreshAt = nextRunAt(source, store.state.settings);
       }
       store.addEvent('info', `已更新订阅源「${source.name}」`, { sourceId: source.id });
