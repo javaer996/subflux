@@ -2847,9 +2847,16 @@ function render(options = {}) {
   restoreSourceSearchFocus();
 }
 
+function checkAssetsStale(data) {
+  if (!data?.meta?.assetsStale || App.staleWarned) return;
+  App.staleWarned = true;
+  toast('前端文件比服务进程新：代码已更新但服务没重启，新接口会报 404。请执行 docker compose restart app（裸机则重启 node 进程）', 'error', 15000);
+}
+
 async function refreshState(shouldRender = true) {
   const data = await api('/api/state');
   App.state = data;
+  checkAssetsStale(data);
   updateChrome();
   if (shouldRender && !App.modalOpen && !App.drawer) render();
   return data;
@@ -2886,6 +2893,7 @@ async function poll() {
   try {
     const data = await api('/api/state');
     App.state = data;
+    checkAssetsStale(data);
     updateChrome();
     const anyRefreshing = data.sources.some((s) => s.status === 'refreshing');
     const running = Boolean(data.job?.running) || Boolean(data.siteJob?.running) || Boolean(data.chinaJob?.running) || anyRefreshing || App.refreshingAll;

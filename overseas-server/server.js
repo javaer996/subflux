@@ -28,8 +28,19 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const STARTED_AT = new Date().toISOString();
+const STARTED_MS = Date.now();
 const BODY_LIMIT = 12 * 1024 * 1024;
 const MAX_TEST_NODES = 2000;
+
+async function assetsUpdatedAfterStart() {
+  for (const name of ['index.html', 'app.js', 'styles.css']) {
+    try {
+      const stat = await fs.stat(path.join(PUBLIC_DIR, name));
+      if (stat.mtimeMs > STARTED_MS + 1500) return true;
+    } catch {}
+  }
+  return false;
+}
 
 const store = await new Store(DATA_DIR).init();
 const quality = new QualityService(store);
@@ -282,6 +293,7 @@ async function handleApi(req, res, url) {
     const state = buildState(store, tester, siteTester, chinaTester, STARTED_AT, engine.available);
     state.meta.siteEnginePath = engine.available ? engine.path : '';
     state.meta.engine = engine;
+    state.meta.assetsStale = await assetsUpdatedAfterStart();
     state.meta.chinaProbeConfigured = Boolean(store.state.settings.chinaProbeUrl);
     state.meta.chinaProbeReverseConfigured = Boolean(store.state.settings.chinaProbeReverseUrl);
     state.meta.directDomainCount = CN_DIRECT_COUNT;

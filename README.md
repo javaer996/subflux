@@ -78,7 +78,7 @@ docker compose run --rm sources    # 重新拉取代码（一次性任务，不�
 docker compose restart app         # 重启加载新代码；依赖与 Mihomo 命中宿主机缓存
 ```
 
-也可以直接 `docker compose up -d`：它会重新跑一遍 `sources` 同步代码，但 `app` 已在运行不会自动重启，之后仍需 `docker compose restart app`。
+也可以直接 `docker compose up -d`：它会重新跑一遍 `sources` 同步代码，但 `app` 已在运行不会自动重启，之后仍需 `docker compose restart app`。如果只更新了文件却没重启，面板会提示「前端文件比服务进程新」。
 
 `REPO_URL` 可以换成自己的 fork；私有仓库用 `https://<token>@github.com/...` 或把 SSH key 挂进 `sources`。
 
