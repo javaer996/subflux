@@ -30,7 +30,6 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const STARTED_AT = new Date().toISOString();
 const STARTED_MS = Date.now();
 const BODY_LIMIT = 12 * 1024 * 1024;
-const MAX_TEST_NODES = 2000;
 
 async function assetsUpdatedAfterStart() {
   for (const name of ['index.html', 'app.js', 'styles.css']) {
@@ -597,10 +596,10 @@ async function handleApi(req, res, url) {
     if (tester.status()?.running || siteTester.status()?.running) return apiError(res, 409, '已有测试任务正在运行', { job: tester.status() || siteTester.status() });
     let nodes;
     if (Array.isArray(body.ids) && body.ids.length) {
-      const ids = new Set(body.ids.slice(0, MAX_TEST_NODES));
+      const ids = new Set(body.ids);
       nodes = store.state.nodes.filter((n) => ids.has(n.id));
     } else {
-      nodes = sortNodeList(nodeQueryFilter(store.state, body.filter || {}), 'quality').slice(0, MAX_TEST_NODES);
+      nodes = sortNodeList(nodeQueryFilter(store.state, body.filter || {}), 'quality');
     }
     if (!nodes.length) return apiError(res, 400, '没有匹配的节点可测试');
     const job = tester.start(nodes, {
@@ -624,13 +623,12 @@ async function handleApi(req, res, url) {
     const sites = (store.state.settings.sites || []).filter((site) => site.enabled !== false);
     if (!sites.length) return apiError(res, 400, '没有启用站点检测项，请先在设置中添加');
     const body = await readBody(req);
-    const limit = safeInt(store.state.settings.siteCheckLimit, 30, 5, 200);
     let nodes;
     if (Array.isArray(body.ids) && body.ids.length) {
-      const ids = new Set(body.ids.slice(0, limit));
+      const ids = new Set(body.ids);
       nodes = store.state.nodes.filter((n) => ids.has(n.id));
     } else {
-      nodes = sortNodeList(nodeQueryFilter(store.state, body.filter || {}), 'quality').slice(0, limit);
+      nodes = sortNodeList(nodeQueryFilter(store.state, body.filter || {}), 'quality');
     }
     if (!nodes.length) return apiError(res, 400, '没有匹配的节点可检测');
     const job = siteTester.start(nodes, sites, { label: '站点解锁检测' });
@@ -847,7 +845,6 @@ async function handleApi(req, res, url) {
       s.chinaProbeTestUrl = value.slice(0, 500);
     }
     if (body.chinaProbeTimeoutMs !== undefined) s.chinaProbeTimeoutMs = safeInt(body.chinaProbeTimeoutMs, s.chinaProbeTimeoutMs, 1000, 15000);
-    if (body.siteCheckLimit !== undefined) s.siteCheckLimit = safeInt(body.siteCheckLimit, s.siteCheckLimit, 5, 200);
     if (body.subBaseUrl !== undefined) {
       const value = String(body.subBaseUrl || '').trim().replace(/\/+$/, '');
       if (value) {

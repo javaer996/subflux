@@ -115,8 +115,7 @@ export class SiteTester {
     if (!this.engineInfo().available) return;
     const sites = (settings.sites || []).filter((site) => site.enabled !== false);
     if (!sites.length) return;
-    const limit = Math.max(1, Number(settings.siteCheckLimit) || 30);
-    const useful = nodes.filter((n) => n && !n.siteCheckedAt).slice(0, limit);
+    const useful = nodes.filter((n) => n && !n.siteCheckedAt);
     if (!useful.length) return;
     if (this.job?.running) {
       for (const node of useful) this.pendingAuto.add(node.id);
@@ -350,7 +349,7 @@ export class SiteTester {
         const ids = [...this.pendingAuto];
         this.pendingAuto.clear();
         const map = new Map(this.store.state.nodes.map((n) => [n.id, n]));
-        const list = ids.map((id) => map.get(id)).filter(Boolean).slice(0, Math.max(1, Number(this.store.state.settings.siteCheckLimit) || 30));
+        const list = ids.map((id) => map.get(id)).filter(Boolean);
         const sites = (this.store.state.settings.sites || []).filter((s) => s.enabled !== false);
         if (list.length && sites.length) {
           setTimeout(() => this.start(list, sites, { label: '自动站点检测', auto: true }), 600).unref?.();

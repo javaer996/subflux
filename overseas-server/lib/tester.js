@@ -58,10 +58,11 @@ export class Tester {
     const wantQuality = settings.autoQuality !== false;
     const wantTcp = Boolean(options.tcp ?? settings.autoTcp);
     if (!wantQuality && !wantTcp) return;
-    const useful = nodes.filter((n) => n && (
+    const full = Boolean(options.all);
+    const useful = nodes.filter((n) => n && (full || (
       (wantQuality && (!n.qualityAt || n.ipType === 'unknown'))
       || (wantTcp && n.testedAt == null)
-    ));
+    )));
     if (!useful.length) return;
     if (this.job?.running) {
       for (const n of useful) this.pendingAuto.add(n.id);

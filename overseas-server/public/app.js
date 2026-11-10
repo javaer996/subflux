@@ -2519,11 +2519,11 @@ function renderSettings() {
                   <label class="switch"><input type="checkbox" name="autoQuality" ${s.autoQuality !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
                 <div class="field-row card card-pad" style="padding:11px 13px">
-                  <div><div class="field-label">刷新后自动连通 / 延迟检测</div><div class="field-hint">TCP 节点测入口；UDP 节点由站点检测补实际连通</div></div>
+                  <div><div class="field-label">刷新后自动连通 / 延迟检测</div><div class="field-hint">刷新后对该源全部节点重新测 TCP 入口；UDP 节点由站点检测补实际连通</div></div>
                   <label class="switch"><input type="checkbox" name="autoTcp" ${s.autoTcp !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
                 <div class="field-row card card-pad" style="padding:11px 13px">
-                  <div><div class="field-label">刷新后自动站点检测</div><div class="field-hint">对新节点真实访问站点，补全站点过滤</div></div>
+                  <div><div class="field-label">刷新后自动站点检测</div><div class="field-hint">只检测还没有站点结果的新节点，不设数量上限</div></div>
                   <label class="switch"><input type="checkbox" name="autoSite" ${s.autoSite !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
                 <div class="field" style="grid-column:span 2">
@@ -2560,10 +2560,8 @@ function renderSettings() {
             <h2>站点解锁检测</h2>
             <div class="desc">通过本地 Mihomo 引擎让节点真实访问网站，判断 YouTube、ChatGPT、Claude、Grok、Gemini 等站点是否可用；结果会写入节点名简写。</div>
             <div class="form-grid">
-              <div class="field">
-                <label for="setting-site-limit">单次最多检测节点数</label>
-                <input class="input" id="setting-site-limit" name="siteCheckLimit" type="number" min="5" max="200" value="${s.siteCheckLimit || 30}">
-                <div class="field-hint">检测逐节点串行，建议 20–50；所有站点并行访问。</div>
+              <div class="field" style="grid-column:span 2">
+                <div class="field-hint">不设数量上限：手动检测会测当前筛选（或勾选）的全部节点；自动检测只补还没有站点结果的节点。检测逐节点串行，所有站点并行访问，节点多时会跑得比较久。</div>
               </div>
               <div class="field">
                 <label>引擎状态</label>
@@ -2798,7 +2796,6 @@ function bindSettings() {
       chinaProbeTestUrl: String(fd.get('chinaProbeTestUrl') || '').trim(),
       chinaProbeReverseUrl: String(fd.get('chinaProbeReverseUrl') || '').trim(),
       excludeDepleted: fd.get('excludeDepleted') === 'on',
-      siteCheckLimit: Number(fd.get('siteCheckLimit')) || 30,
       mihomoPath: String(fd.get('mihomoPath') || '').trim(),
       subBaseUrl: String(fd.get('subBaseUrl') || '').trim(),
       sites,

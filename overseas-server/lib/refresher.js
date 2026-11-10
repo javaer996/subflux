@@ -12,6 +12,15 @@ const QUALITY_FIELDS = [
   'ipType', 'qualityScore', 'qualityLabel', 'qualityNote', 'risk', 'qualityAt',
 ];
 
+// 刷新只更新节点本身的信息，这些检测结果要按节点指纹保留下来，
+// 否则每次刷新都会丢掉站点 / CN 结果，自动检测又会把老节点当成新节点重测。
+const PRESERVED_FIELDS = [
+  ...QUALITY_FIELDS,
+  'testNote', 'proxyLatency',
+  'sites', 'siteLatency', 'siteCheckedAt', 'siteError',
+  'cnReachable', 'cnLatency', 'cnCheckedAt', 'cnMethod', 'cnProxyStatus', 'cnError',
+];
+
 /**
  * 下一次自动刷新时间。
  * - 手动粘贴的内容（kind=text）不会自动刷新，返回 null
@@ -127,7 +136,7 @@ function mergeOldState(node, prev, now, source) {
     updatedAt: now,
   };
   if (prev) {
-    for (const key of QUALITY_FIELDS) {
+    for (const key of PRESERVED_FIELDS) {
       if (prev[key] !== undefined) merged[key] = prev[key];
     }
   }
@@ -205,7 +214,7 @@ export async function refreshSource(store, source, deps = {}) {
     const extra = parsed.warnings?.length ? `（${parsed.warnings.join('；')}）` : '';
     store.addEvent('success', `${source.name} 刷新完成：${nodes.length} 个节点${extra}`, { sourceId: source.id });
 
-    if (deps.tester) deps.tester.enqueueAuto(nodes, { tcp: state.settings.autoTcp });
+    if (deps.tester) deps.tester.enqueueAuto(nodes, { tcp: state.settings.autoTcp, all: true });
     if (deps.siteTester) deps.siteTester.enqueueAuto(nodes);
     return {
       ok: true,
