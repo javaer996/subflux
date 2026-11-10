@@ -643,6 +643,8 @@ function renderOverview() {
   return `
     <section class="view">
       ${pageHead('OVERVIEW', '订阅汇聚', '把分散的机场订阅整理成一份干净、可筛选、可分享的出口。定时刷新、解析、IP 画像，全部在一个轻量面板里完成。', `
+        <button class="btn btn-ghost" data-action="export-sources">${ico('download')}<span>导出</span></button>
+        <button class="btn btn-ghost" data-action="import-sources">${ico('upload')}<span>导入</span></button>
         <button class="btn btn-ghost" data-action="refresh-all">${ico('refresh')}<span>刷新全部</span></button>
         <button class="btn btn-primary" data-action="add-source">${ico('plus')}<span>添加订阅</span></button>
       `)}
@@ -867,6 +869,8 @@ function renderSources() {
   return `
     <section class="view">
       ${pageHead('SOURCES', '订阅源', '每个订阅独立设置刷新周期、请求身份与启用状态。HTTP 响应会被自动识别为 Clash YAML、Base64 或节点链接列表。', `
+        <button class="btn btn-ghost" data-action="export-sources">${ico('download')}<span>导出</span></button>
+        <button class="btn btn-ghost" data-action="import-sources">${ico('upload')}<span>导入</span></button>
         <button class="btn btn-ghost" data-action="refresh-all">${ico('refresh')}<span>刷新全部</span></button>
         <button class="btn btn-primary" data-action="add-source">${ico('plus')}<span>添加订阅</span></button>
       `)}
@@ -3086,6 +3090,91 @@ async function toggleNode(id) {
   }
 }
 
+async function exportSources() {
+  try {
+    const res = await fetch('/api/sources/export', { headers: { accept: 'application/json' } });
+    if (!res.ok) throw new Error(`导出失败（${res.status}）`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `subflux-sources-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`已导出 ${App.state.stats.sources.total} 个订阅源`, 'success');
+  } catch (err) {
+    toast(err.message, 'error', 6000);
+  }
+}
+
+function openImportSourcesModal() {
+  openModal({
+    title: '导入订阅源',
+    subtitle: '合并导入，不会覆盖现有订阅源',
+    size: 'md',
+    content: `
+      <form id="sources-import-form" autocomplete="off">
+        <div class="field">
+          <label>选择导出文件</label>
+          <input class="input" type="file" id="sources-import-file" accept="application/json,.json">
+        </div>
+        <div class="field">
+          <label for="sources-import-text">或者直接粘贴 JSON</label>
+          <textarea class="textarea" id="sources-import-text" rows="8" placeholder='{"sources":[{"name":"…","kind":"url","url":"https://…"}]}'></textarea>
+          <div class="field-hint">支持本页「导出」生成的文件，也接受纯数组 JSON。相同订阅链接或相同粘贴内容会自动跳过；导入的 URL 源会在后台自动抓取。</div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+          <button type="submit" class="btn btn-primary">${ico('upload')}<span>开始导入</span></button>
+        </div>
+      </form>`,
+  });
+  const fileInput = $('#sources-import-file');
+  fileInput?.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const area = $('#sources-import-text');
+      if (area) area.value = text;
+      toast(`已读取 ${file.name}`, 'info');
+    } catch (err) {
+      toast(`读取文件失败：${err.message}`, 'error', 6000);
+    }
+  });
+  $('#sources-import-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const raw = String($('#sources-import-text')?.value || '').trim();
+    if (!raw) return toast('请选择文件或粘贴 JSON', 'warn');
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (err) {
+      return toast(`JSON 解析失败：${err.message}`, 'error', 6000);
+    }
+    const list = Array.isArray(data) ? data : Array.isArray(data?.sources) ? data.sources : null;
+    if (!list) return toast('JSON 里没有 sources 数组', 'error', 6000);
+    const btn = event.submitter;
+    if (btn) btn.disabled = true;
+    try {
+      const result = await api('/api/sources/import', { method: 'POST', body: JSON.stringify({ sources: list }) });
+      closeModal();
+      await refreshState(false);
+      render();
+      const parts = [`新增 ${result.imported} 个`];
+      if (result.skipped) parts.push(`跳过 ${result.skipped} 个重复`);
+      if (result.failed) parts.push(`失败 ${result.failed} 个`);
+      toast(`导入完成：${parts.join('，')}`, result.failed ? 'warn' : 'success', 7000);
+      if (result.errors?.length) console.warn('导入失败明细', result.errors);
+    } catch (err) {
+      toast(`导入失败：${err.message}`, 'error', 7000);
+      if (btn) btn.disabled = false;
+    }
+  });
+}
+
 async function refreshAllSources() {
   if (App.refreshingAll) return;
   const enabled = App.state.sources.filter((s) => s.enabled).length;
@@ -3167,6 +3256,8 @@ function bindGlobalEvents() {
       return;
     }
     if (action === 'add-source') return openSourceModal();
+    if (action === 'export-sources') return exportSources();
+    if (action === 'import-sources') return openImportSourcesModal();
     if (action === 'clear-source-search') {
       App.sourceQuery = '';
       render();

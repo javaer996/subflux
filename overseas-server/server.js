@@ -1,5 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
@@ -214,6 +215,54 @@ function sanitizePush(input, existing) {
   };
 }
 
+function badRequest(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function makeSource(body = {}) {
+  const kind = body.kind === 'text' ? 'text' : 'url';
+  let urlValue = '';
+  let content = '';
+  if (kind === 'url') {
+    if (!isHttpUrl(body.url)) throw badRequest(400, '请输入有效的 http(s) 订阅链接');
+    urlValue = normalizeSourceUrl(body.url);
+  } else {
+    content = String(body.content || '').trim();
+    if (!content) throw badRequest(400, '粘贴的订阅内容不能为空');
+    if (content.length > 10 * 1024 * 1024) throw badRequest(413, '粘贴内容超过 10MB');
+  }
+  const name = String(body.name || '').trim().slice(0, 40) || (kind === 'url' ? new URL(urlValue).hostname : '手动导入');
+  const now = new Date().toISOString();
+  const autoRefresh = body.autoRefresh === undefined ? true : Boolean(body.autoRefresh);
+  const proxyFields = readProxyFields(body);
+  return {
+    id: uid(8),
+    name,
+    kind,
+    url: urlValue,
+    content,
+    enabled: body.enabled === undefined ? true : Boolean(body.enabled),
+    intervalMinutes: safeInt(body.intervalMinutes, store.state.settings.defaultInterval, 5, 5256000),
+    userAgent: String(body.userAgent || '').slice(0, 200),
+    ...proxyFields,
+    useProxy: proxyFields.proxyMode !== 'direct',
+    autoRefresh,
+    status: 'idle',
+    error: null,
+    warnings: [],
+    traffic: null,
+    trafficUpdatedAt: null,
+    nodeCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    lastRefreshAt: null,
+    lastSuccessAt: null,
+    nextRefreshAt: kind === 'text' || autoRefresh === false ? null : now,
+  };
+}
+
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   const method = req.method || 'GET';
@@ -251,53 +300,15 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/sources' && method === 'POST') {
     if (store.state.sources.length >= 200) return apiError(res, 400, '最多添加 200 个订阅源');
     const body = await readBody(req);
-    const kind = body.kind === 'text' ? 'text' : 'url';
-    let urlValue = '';
-    let content = '';
-    if (kind === 'url') {
-      if (!isHttpUrl(body.url)) return apiError(res, 400, '请输入有效的 http(s) 订阅链接');
-      urlValue = normalizeSourceUrl(body.url);
-    } else {
-      content = String(body.content || '').trim();
-      if (!content) return apiError(res, 400, '粘贴的订阅内容不能为空');
-      if (content.length > 10 * 1024 * 1024) return apiError(res, 413, '粘贴内容超过 10MB');
-    }
-    const name = String(body.name || '').trim().slice(0, 40) || (kind === 'url' ? new URL(urlValue).hostname : '手动导入');
-    const now = new Date().toISOString();
-    const autoRefresh = body.autoRefresh === undefined ? true : Boolean(body.autoRefresh);
-    let proxyFields;
+    let source;
     try {
-      proxyFields = readProxyFields(body);
+      source = makeSource(body);
     } catch (err) {
-      return apiError(res, 400, err.message);
+      return apiError(res, err.status || 400, err.message);
     }
-    const source = {
-      id: uid(8),
-      name,
-      kind,
-      url: urlValue,
-      content,
-      enabled: body.enabled === undefined ? true : Boolean(body.enabled),
-      intervalMinutes: safeInt(body.intervalMinutes, store.state.settings.defaultInterval, 5, 5256000),
-      userAgent: String(body.userAgent || '').slice(0, 200),
-      ...proxyFields,
-      useProxy: proxyFields.proxyMode !== 'direct',
-      autoRefresh,
-      status: 'idle',
-      error: null,
-      warnings: [],
-      traffic: null,
-      trafficUpdatedAt: null,
-      nodeCount: 0,
-      createdAt: now,
-      updatedAt: now,
-      lastRefreshAt: null,
-      lastSuccessAt: null,
-      nextRefreshAt: kind === 'text' || autoRefresh === false ? null : now,
-    };
     store.state.sources.push(source);
     store.addEvent('info', `已添加订阅源「${source.name}」`, { sourceId: source.id });
-    if (kind === 'text') {
+    if (source.kind === 'text') {
       await refreshSource(store, source, { tester, siteTester });
     } else if (source.enabled) {
       setTimeout(() => {
@@ -309,6 +320,98 @@ async function handleApi(req, res, url) {
       ok: true,
       source: serializeSource(source, store.state.settings),
     });
+  }
+
+  if (pathname === '/api/sources/export' && method === 'GET') {
+    const sources = store.state.sources.map((s) => ({
+      name: s.name,
+      kind: s.kind,
+      url: s.kind === 'url' ? s.url : '',
+      content: s.kind === 'text' ? s.content : '',
+      enabled: s.enabled,
+      intervalMinutes: s.intervalMinutes,
+      autoRefresh: s.autoRefresh !== false,
+      userAgent: s.userAgent || '',
+      proxyMode: s.proxyMode || (s.useProxy ? 'custom' : 'direct'),
+      proxyNodeId: s.proxyNodeId || '',
+      proxyNodeName: store.state.nodes.find((n) => n.id === s.proxyNodeId)?.name || '',
+      proxyUrl: s.proxyUrl || '',
+    }));
+    const payload = {
+      app: 'subflux',
+      kind: 'sources',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      count: sources.length,
+      sources,
+    };
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="subflux-sources-${new Date().toISOString().slice(0, 10)}.json"`,
+      'cache-control': 'no-store',
+    });
+    return res.end(JSON.stringify(payload, null, 2));
+  }
+
+  if (pathname === '/api/sources/import' && method === 'POST') {
+    const body = await readBody(req, 24 * 1024 * 1024);
+    const list = Array.isArray(body) ? body : Array.isArray(body?.sources) ? body.sources : null;
+    if (!list) return apiError(res, 400, '导入内容需要包含 sources 数组');
+    if (!list.length) return apiError(res, 400, '导入内容里没有订阅源');
+    if (list.length > 500) return apiError(res, 400, '一次最多导入 500 个订阅源');
+    const urlSet = new Set(store.state.sources.filter((s) => s.kind === 'url').map((s) => s.url));
+    const textSet = new Set(store.state.sources.filter((s) => s.kind === 'text').map((s) => crypto.createHash('sha1').update(s.content || '').digest('hex')));
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+    const textSources = [];
+    for (const item of list) {
+      if (store.state.sources.length >= 200) {
+        errors.push('已达 200 个订阅源上限，剩余未导入');
+        break;
+      }
+      try {
+        const source = makeSource(item || {});
+        const textHash = source.kind === 'text' ? crypto.createHash('sha1').update(source.content).digest('hex') : '';
+        if (source.kind === 'url' && urlSet.has(source.url)) {
+          skipped += 1;
+          continue;
+        }
+        if (source.kind === 'text' && textSet.has(textHash)) {
+          skipped += 1;
+          continue;
+        }
+        if (source.proxyMode === 'pool') {
+          const wantedId = String(item.proxyNodeId || '');
+          const wantedName = String(item.proxyNodeName || '');
+          const node = store.state.nodes.find((n) => n.id === wantedId) || (wantedName && store.state.nodes.find((n) => n.name === wantedName));
+          if (node) {
+            source.proxyNodeId = node.id;
+          } else {
+            source.proxyMode = 'direct';
+            source.proxyNodeId = '';
+            source.useProxy = false;
+          }
+        }
+        store.state.sources.push(source);
+        if (source.kind === 'url') urlSet.add(source.url);
+        else textSet.add(textHash);
+        imported += 1;
+        if (source.kind === 'text') textSources.push(source);
+      } catch (err) {
+        errors.push(`${String(item?.name || '未命名')}：${err.message}`);
+      }
+    }
+    for (const source of textSources) {
+      try {
+        await refreshSource(store, source, { tester, siteTester });
+      } catch (err) {
+        errors.push(`${source.name}：${errMessage(err)}`);
+      }
+    }
+    store.addEvent(imported ? 'info' : 'warn', `导入订阅源：新增 ${imported} 个，跳过 ${skipped} 个${errors.length ? `，失败 ${errors.length} 个` : ''}`);
+    await store.flush();
+    return sendJson(res, 200, { ok: true, imported, skipped, failed: errors.length, errors: errors.slice(0, 20) });
   }
 
   const sourceMatch = pathname.match(/^\/api\/sources\/([A-Za-z0-9_-]+)(?:\/(refresh|preview))?$/);
