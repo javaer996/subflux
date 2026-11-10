@@ -33,6 +33,8 @@ function snapshotJob(job) {
     ok: job.ok,
     fail: job.fail,
     skipped: job.skipped || 0,
+    concurrency: job.concurrency || 0,
+    timeoutMs: job.timeoutMs || 0,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     note: job.note || '',
@@ -92,6 +94,8 @@ export class Tester {
       ok: 0,
       fail: 0,
       skipped: 0,
+      concurrency: 0,
+      timeoutMs: 0,
       startedAt: new Date().toISOString(),
       finishedAt: null,
       note: '',
@@ -114,8 +118,11 @@ export class Tester {
     if (options.tcp !== false) {
       job.phase = 'tcp';
       const timeout = Number(this.store.state.settings.tcpTimeoutMs || 2500);
+      const concurrency = Math.max(1, Math.min(64, Number(this.store.state.settings.tcpConcurrency) || 16));
+      job.timeoutMs = timeout;
+      job.concurrency = Math.min(concurrency, nodes.length);
       let cursor = 0;
-      const workers = Array.from({ length: Math.min(8, nodes.length) }, async () => {
+      const workers = Array.from({ length: job.concurrency }, async () => {
         while (cursor < nodes.length) {
           const node = nodes[cursor++];
           if (UDP_PROTOCOLS.has(String(node.protocol).toLowerCase())) {

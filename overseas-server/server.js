@@ -593,7 +593,7 @@ async function handleApi(req, res, url) {
 
   if (pathname === '/api/nodes/test' && method === 'POST') {
     const body = await readBody(req);
-    if (tester.status()?.running || siteTester.status()?.running) return apiError(res, 409, '已有测试任务正在运行', { job: tester.status() || siteTester.status() });
+    if (tester.status()?.running) return apiError(res, 409, '已有测速任务正在运行', { job: tester.status() });
     let nodes;
     if (Array.isArray(body.ids) && body.ids.length) {
       const ids = new Set(body.ids);
@@ -602,19 +602,21 @@ async function handleApi(req, res, url) {
       nodes = sortNodeList(nodeQueryFilter(store.state, body.filter || {}), 'quality');
     }
     if (!nodes.length) return apiError(res, 400, '没有匹配的节点可测试');
+    const qualityOnly = Boolean(body.qualityOnly);
+    const latencyOnly = Boolean(body.latencyOnly);
     const job = tester.start(nodes, {
-      tcp: body.qualityOnly ? false : true,
-      quality: true,
-      label: body.qualityOnly ? '手动 IP 画像' : '手动测速',
+      tcp: qualityOnly ? false : true,
+      quality: qualityOnly ? true : latencyOnly ? false : true,
+      label: qualityOnly ? '手动 IP 画像' : latencyOnly ? '手动测速' : '手动测速 + IP 画像',
     });
     if (!job) return apiError(res, 409, '测试任务启动失败', { job: tester.status() });
-    store.addEvent('info', `开始测试 ${nodes.length} 个节点（${body.qualityOnly ? '仅 IP 画像' : 'TCP 延迟 + IP 画像'}）`);
+    store.addEvent('info', `开始测试 ${nodes.length} 个节点（${qualityOnly ? '仅 IP 画像' : latencyOnly ? '仅 TCP 延迟' : 'TCP 延迟 + IP 画像'}）`);
     return sendJson(res, 202, { ok: true, job });
   }
 
   if (pathname === '/api/nodes/sites' && method === 'POST') {
-    if (tester.status()?.running || siteTester.status()?.running) {
-      return apiError(res, 409, '已有测试任务正在运行', { job: tester.status() || siteTester.status() });
+    if (siteTester.status()?.running) {
+      return apiError(res, 409, '已有站点检测任务正在运行', { job: siteTester.status() });
     }
     if (!(await siteTester.engineAvailable())) {
       const info = siteTester.engineInfo();
@@ -816,6 +818,14 @@ async function handleApi(req, res, url) {
     if (body.autoQuality !== undefined) s.autoQuality = Boolean(body.autoQuality);
     if (body.autoTcp !== undefined) s.autoTcp = Boolean(body.autoTcp);
     if (body.autoSite !== undefined) s.autoSite = Boolean(body.autoSite);
+    let latencyChanged = false;
+    if (body.latencyAuto !== undefined) { s.latencyAuto = Boolean(body.latencyAuto); latencyChanged = true; }
+    if (body.latencyIntervalMinutes !== undefined) {
+      const next = safeInt(body.latencyIntervalMinutes, s.latencyIntervalMinutes, 5, 5256000);
+      if (next !== s.latencyIntervalMinutes) latencyChanged = true;
+      s.latencyIntervalMinutes = next;
+    }
+    if (body.tcpConcurrency !== undefined) s.tcpConcurrency = safeInt(body.tcpConcurrency, s.tcpConcurrency, 1, 64);
     if (body.fetchProxy !== undefined) {
       const value = String(body.fetchProxy || '').trim();
       if (value && !/^https?:\/\//i.test(value)) return apiError(res, 400, '拉取代理必须是 http(s) 代理地址');
@@ -872,6 +882,11 @@ async function handleApi(req, res, url) {
       ]);
       routing.customRules = '';
       s.routing = routing;
+    }
+    if (s.latencyAuto === false) {
+      s.latencyNextAt = null;
+    } else if (latencyChanged || !s.latencyNextAt) {
+      s.latencyNextAt = new Date(Date.now() + Math.max(5, Number(s.latencyIntervalMinutes) || 60) * 60_000).toISOString();
     }
     store.addEvent('info', '系统设置已更新');
     await store.flush();

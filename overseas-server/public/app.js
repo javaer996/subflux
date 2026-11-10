@@ -61,6 +61,7 @@ const VIEW_META = {
   overview: { title: '概览', eyebrow: 'OVERVIEW' },
   sources: { title: '订阅源', eyebrow: 'SOURCES' },
   nodes: { title: '节点池', eyebrow: 'NODE POOL' },
+  tasks: { title: '任务中心', eyebrow: 'TASKS' },
   profiles: { title: '输出订阅', eyebrow: 'OUTPUTS' },
   settings: { title: '设置与说明', eyebrow: 'SYSTEM' },
 };
@@ -367,7 +368,9 @@ function updateChrome() {
   if (sideText) sideText.textContent = activeSources ? '正在同步订阅' : '服务运行中';
   const mem = $('#side-memory');
   if (mem) mem.textContent = `${state.meta.memoryMB} MB`;
+  const runningTasks = (state.job?.running ? 1 : 0) + (state.siteJob?.running ? 1 : 0) + (state.chinaJob?.running ? 1 : 0) + activeSources;
   const badges = {
+    'nav-badge-tasks': runningTasks,
     'nav-badge-sources': stats.sources.total,
     'nav-badge-nodes': stats.nodes.usable,
     'nav-badge-profiles': state.profiles.length,
@@ -1587,14 +1590,15 @@ async function startNodeTest(options = {}) {
   try {
     const payload = {};
     if (options.ids) payload.ids = options.ids;
-    else payload.filter = nodeFilterPayload();
+    else payload.filter = options.filter || nodeFilterPayload();
     if (options.qualityOnly) payload.qualityOnly = true;
+    if (options.latencyOnly) payload.latencyOnly = true;
     const data = await api('/api/nodes/test', { method: 'POST', body: JSON.stringify(payload) });
     toast(`测试任务已启动：${data.job.total} 个节点`, 'success');
     App.fastPoll = true;
     await refreshState(false);
-    if (App.view === 'nodes') {
-      if (!App.state.job?.running) await loadNodes();
+    if (App.view === 'nodes' || App.view === 'tasks') {
+      if (App.view === 'nodes' && !App.state.job?.running) await loadNodes();
       render();
     }
     schedulePoll(1000);
@@ -2452,6 +2456,125 @@ function siteSettingRow(site) {
     </div>`;
 }
 
+/* ------------------------- tasks ------------------------- */
+
+function taskProgress(job) {
+  const total = Math.max(1, Number(job.total) || 0);
+  const pct = Math.min(100, Math.round(((Number(job.done) || 0) / total) * 100));
+  return `
+    <div class="job-progress" style="width:100%"><i style="width:${pct}%"></i></div>
+    <div class="task-sub">${fmtNum(job.done)} / ${fmtNum(job.total)} · ${pct}%${job.skipped ? ` · 跳过 ${fmtNum(job.skipped)}` : ''}</div>`;
+}
+
+function taskCard(title, icon, job, queue) {
+  const running = Boolean(job && job.running);
+  const last = job && !job.running ? job : null;
+  let body = '<div class="task-sub">还没有运行记录</div>';
+  if (running) {
+    body = `
+      <div class="task-sub">${esc(job.note || '运行中')}</div>
+      ${taskProgress(job)}
+      <div class="task-sub">并发 ${job.concurrency || '—'} · 超时 ${job.timeoutMs ? `${job.timeoutMs} ms` : '—'} · 开始 ${fmtTime(job.startedAt)}</div>`;
+  } else if (last) {
+    body = `<div class="task-sub">上次 ${fmtTime(last.finishedAt)} · ${fmtNum(last.total)} 个节点 · 成功 ${fmtNum(last.ok)} · 失败 ${fmtNum(last.fail)}${last.skipped ? ` · 跳过 ${fmtNum(last.skipped)}` : ''}</div>`;
+  }
+  return `
+    <div class="card task-card">
+      <div class="task-head">
+        <span class="task-icon">${ico(icon)}</span>
+        <strong>${esc(title)}</strong>
+        ${running ? '<span class="badge badge-blue">运行中</span>' : '<span class="badge badge-muted">空闲</span>'}
+      </div>
+      ${body}
+      ${queue ? `<div class="task-sub">队列中还有 ${fmtNum(queue)} 个节点</div>` : ''}
+    </div>`;
+}
+
+function renderTasks() {
+  const state = App.state;
+  if (!state) return '';
+  const queues = state.meta.queues || {};
+  const jobs = [
+    { title: '延迟测速', icon: 'activity', job: state.job, queue: queues.latency },
+    { title: '站点检测', icon: 'globe', job: state.siteJob, queue: queues.site },
+    { title: 'CN 实际检测', icon: 'server', job: state.chinaJob, queue: 0 },
+  ];
+  const running = jobs.filter((item) => item.job?.running);
+  const refreshing = state.sources.filter((source) => source.status === 'refreshing');
+  const s = state.settings || {};
+  const latencyOff = s.latencyAuto === false;
+  const pushes = (state.profiles || []).filter((profile) => profile.push?.enabled);
+  const scheduledSources = state.sources.filter((source) => source.kind !== 'text' && source.autoRefresh !== false);
+  const events = (state.events || []).slice(0, 8);
+  return `
+    <section class="view">
+      ${pageHead('TASKS', '任务中心', `当前 ${running.length + refreshing.length} 个任务在跑。测速、站点检测、CN 检测各自同时只跑一个，后来的任务排队等待；不同订阅源的刷新可以并行，刷新和检测也可以同时进行。`, `<button class="btn btn-primary" data-action="test-all">${ico('activity')}<span>立即测速全部</span></button>`)}
+      <div class="task-grid">
+        ${jobs.map((item) => taskCard(item.title, item.icon, item.job, item.queue)).join('')}
+        <div class="card task-card">
+          <div class="task-head">
+            <span class="task-icon">${ico('rss')}</span>
+            <strong>订阅刷新</strong>
+            ${refreshing.length ? '<span class="badge badge-blue">运行中</span>' : '<span class="badge badge-muted">空闲</span>'}
+          </div>
+          ${refreshing.length
+            ? refreshing.map((source) => `<div class="task-sub">${esc(source.name)} · 正在拉取订阅</div>`).join('')
+            : '<div class="task-sub">没有正在刷新的订阅源</div>'}
+          <div class="task-sub">同一订阅源不会重复刷新，不同订阅源之间并行。</div>
+        </div>
+      </div>
+
+      <div class="card settings-section">
+        <h2>定时计划</h2>
+        <div class="desc">所有定时任务由同一个 30 秒调度器驱动，按各自的下次执行时间判断；到点只触发一次，执行前会检查是否已有同类任务在跑。</div>
+        <div class="table-wrap">
+          <table class="table" style="min-width:660px">
+            <thead><tr><th>任务</th><th>间隔</th><th>下次</th><th>上次</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>延迟测速</td>
+                <td>${latencyOff ? '—' : `${fmtNum(s.latencyIntervalMinutes || 60)} 分钟`}</td>
+                <td>${latencyOff ? '已关闭' : `${fmtTime(s.latencyNextAt)}（${relTime(s.latencyNextAt)}）`}</td>
+                <td>${fmtTime(s.latencyLastAt)}</td>
+                <td>${latencyOff ? '<span class="badge badge-muted">已关闭</span>' : '<span class="badge badge-mint">已开启</span>'} · 并发 ${fmtNum(s.tcpConcurrency || 16)} · 超时 ${fmtNum(s.tcpTimeoutMs || 2500)} ms</td>
+              </tr>
+              ${scheduledSources.map((source) => `
+                <tr>
+                  <td>刷新 · ${esc(source.name)}</td>
+                  <td>${fmtNum(source.intervalMinutes)} 分钟</td>
+                  <td>${fmtTime(source.nextRefreshAt)}</td>
+                  <td>${fmtTime(source.lastRefreshAt)}</td>
+                  <td>${source.enabled ? '<span class="badge badge-mint">已启用</span>' : '<span class="badge badge-muted">已停用</span>'}</td>
+                </tr>`).join('')}
+              ${pushes.map((profile) => `
+                <tr>
+                  <td>推送 · ${esc(profile.name)}</td>
+                  <td>${fmtNum(profile.push.intervalMinutes)} 分钟</td>
+                  <td>${fmtTime(profile.push.nextPushAt)}</td>
+                  <td>${fmtTime(profile.push.lastPushAt)}</td>
+                  <td>${profile.push.lastStatus === 'error' ? '<span class="badge badge-red">上次失败</span>' : profile.push.lastStatus === 'partial' ? '<span class="badge badge-amber">部分失败</span>' : '<span class="badge badge-mint">正常</span>'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${latencyOff && !scheduledSources.length && !pushes.length ? '<div class="task-sub" style="padding:12px 2px 0">还没有定时任务：到订阅源或输出订阅里开启自动刷新 / 定时推送后会出现在这里。</div>' : ''}
+      </div>
+
+      <div class="card settings-section">
+        <h2>最近事件</h2>
+        <div class="desc">刷新、测速、站点检测和推送的执行记录。</div>
+        ${events.length ? `<div class="timeline">${events.map((e) => `
+          <div class="timeline-item">
+            <span class="timeline-dot ${esc(e.level)}"></span>
+            <div class="timeline-main">
+              <div class="timeline-msg">${esc(e.message)}</div>
+              <div class="timeline-time">${relTime(e.at)} · ${fmtTime(e.at)}</div>
+            </div>
+          </div>`).join('')}</div>` : '<div class="empty" style="padding:24px 8px"><p>还没有事件记录。</p></div>'}
+      </div>
+    </section>`;
+}
+
 function renderSettings() {
   const s = App.state.settings;
   const meta = App.state.meta;
@@ -2538,6 +2661,36 @@ function renderSettings() {
                   <div><div class="field-label">流量耗尽 / 过期时剔除节点</div><div class="field-hint">根据订阅响应的 Subscription-Userinfo 判断；关闭后即使耗尽也继续输出</div></div>
                   <label class="switch"><input type="checkbox" name="excludeDepleted" ${s.excludeDepleted !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card settings-section">
+            <h2>定时测速</h2>
+            <div class="desc">按固定间隔重新测所有节点的 TCP 入口延迟。只探测端口，不走代理；HY2 / TUIC 等 UDP 节点会跳过。</div>
+            <div class="form-grid">
+              <div class="field-row card card-pad" style="padding:11px 13px;grid-column:span 2">
+                <div><div class="field-label">启用定时测速</div><div class="field-hint">到点时如果已有测速任务在跑，会等它结束后再开始；站点检测可以同时进行</div></div>
+                <label class="switch"><input type="checkbox" name="latencyAuto" ${s.latencyAuto !== false ? 'checked' : ''}><span class="track"></span></label>
+              </div>
+              <div class="field">
+                <label for="setting-latency-interval">测速间隔（分钟）</label>
+                <input class="input" id="setting-latency-interval" name="latencyIntervalMinutes" type="number" min="5" max="5256000" value="${s.latencyIntervalMinutes || 60}">
+                <div class="quick-values" style="margin-top:8px">
+              <button type="button" data-latency-quick="15">15 分</button>
+              <button type="button" data-latency-quick="30">30 分</button>
+              <button type="button" data-latency-quick="60">1 小时</button>
+              <button type="button" data-latency-quick="180">3 小时</button>
+              <button type="button" data-latency-quick="360">6 小时</button>
+              <button type="button" data-latency-quick="720">12 小时</button>
+              <button type="button" data-latency-quick="1440">24 小时</button>
+                </div>
+                <div class="field-hint">下次 ${s.latencyAuto === false ? '—' : esc(fmtTime(s.latencyNextAt))} · 上次 ${esc(fmtTime(s.latencyLastAt))}</div>
+              </div>
+              <div class="field">
+                <label for="setting-tcp-concurrency">测速并发</label>
+                <input class="input" id="setting-tcp-concurrency" name="tcpConcurrency" type="number" min="1" max="64" step="1" value="${s.tcpConcurrency || 16}">
+                <div class="field-hint">同时探测的节点数，超时用上面的「TCP 测速超时」。400 个节点、16 并发、2.5 秒超时，最坏约 1 分钟跑完。</div>
               </div>
             </div>
           </div>
@@ -2725,6 +2878,10 @@ function bindSettings() {
       if (preview) preview.textContent = sampleName(templateInput.value);
     });
   });
+  $$('[data-latency-quick]').forEach((btn) => btn.addEventListener('click', () => {
+    const input = $('#setting-latency-interval');
+    if (input) input.value = btn.dataset.latencyQuick;
+  }));
   const siteRows = $('#site-rows');
   $('[data-add-site]')?.addEventListener('click', () => {
     if (!siteRows) return;
@@ -2789,6 +2946,9 @@ function bindSettings() {
       autoQuality: fd.get('autoQuality') === 'on',
       autoTcp: fd.get('autoTcp') === 'on',
       autoSite: fd.get('autoSite') === 'on',
+      latencyAuto: fd.get('latencyAuto') === 'on',
+      latencyIntervalMinutes: Number(fd.get('latencyIntervalMinutes')) || 60,
+      tcpConcurrency: Number(fd.get('tcpConcurrency')) || 16,
       fetchProxy: String(fd.get('fetchProxy') || '').trim(),
       chinaProbeUrl: String(fd.get('chinaProbeUrl') || '').trim(),
       chinaProbeToken: String(fd.get('chinaProbeToken') || '').trim(),
@@ -2832,6 +2992,7 @@ function render(options = {}) {
   let html = '';
   if (App.view === 'sources') html = renderSources();
   else if (App.view === 'nodes') html = renderNodes();
+  else if (App.view === 'tasks') html = renderTasks();
   else if (App.view === 'profiles') html = renderProfiles();
   else if (App.view === 'settings') html = renderSettings();
   else html = renderOverview();
@@ -3285,6 +3446,7 @@ function bindGlobalEvents() {
       return copyText(subUrl(profile), '订阅链接已复制');
     }
     if (action === 'test-filter') return startNodeTest();
+    if (action === 'test-all') return startNodeTest({ filter: { status: 'all' }, latencyOnly: true });
     if (action === 'test-china') {
       if (!App.selected.size && !App.state.stats.nodes.total) return toast('没有可检测的节点', 'warn');
       return startChinaTest(App.selected.size ? { ids: [...App.selected] } : {});

@@ -277,6 +277,10 @@ export function buildState(store, tester, siteTester, chinaTester, startedAt, si
         { id: 'plain', label: '节点链接' },
       ],
       siteEngine,
+      queues: {
+        latency: tester.pendingAuto?.size || 0,
+        site: siteTester?.pendingAuto?.size || 0,
+      },
       startedAt,
       uptimeSec: Math.round(process.uptime()),
       memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),

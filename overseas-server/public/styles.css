@@ -901,3 +901,17 @@ details.advanced > .form-stack { padding-top: 15px; }
   word-break: break-all; text-align: center;
 }
 .qr-modal .modal-actions { width: 100%; justify-content: center; flex-wrap: wrap; }
+
+/* ------------------------- task center ------------------------- */
+.task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.task-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.task-head { display: flex; align-items: center; gap: 9px; }
+.task-head strong { font-size: 13px; font-weight: 600; }
+.task-head .badge { margin-left: auto; }
+.task-icon { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center; border-radius: 8px; background: rgba(104,168,255,.08); color: var(--blue); }
+.task-icon svg { width: 14px; height: 14px; }
+.task-sub { font-size: 11px; color: var(--muted); line-height: 1.55; }
+
+@media (max-width: 760px) {
+  .task-grid { grid-template-columns: minmax(0, 1fr); }
+}
