@@ -16,7 +16,7 @@ const QUALITY_FIELDS = [
 // 否则每次刷新都会丢掉站点 / CN 结果，自动检测又会把老节点当成新节点重测。
 const PRESERVED_FIELDS = [
   ...QUALITY_FIELDS,
-  'testNote', 'proxyLatency',
+  'testNote', 'proxyLatency', 'connectError', 'certTrusted', 'certError',
   'sites', 'siteLatency', 'siteCheckedAt', 'siteError',
   'cnReachable', 'cnLatency', 'cnCheckedAt', 'cnMethod', 'cnProxyStatus', 'cnError',
 ];
@@ -214,7 +214,7 @@ export async function refreshSource(store, source, deps = {}) {
     const extra = parsed.warnings?.length ? `（${parsed.warnings.join('；')}）` : '';
     store.addEvent('success', `${source.name} 刷新完成：${nodes.length} 个节点${extra}`, { sourceId: source.id });
 
-    if (deps.tester) deps.tester.enqueueAuto(nodes, { tcp: state.settings.autoTcp, all: true });
+    if (deps.tester) deps.tester.enqueueAuto(nodes, { connect: state.settings.autoConnect ?? state.settings.autoTcp, all: true });
     if (deps.siteTester) deps.siteTester.enqueueAuto(nodes);
     return {
       ok: true,

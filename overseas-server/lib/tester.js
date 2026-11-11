@@ -1,25 +1,5 @@
-import net from 'node:net';
 import { uid } from './util.js';
-
-const UDP_PROTOCOLS = new Set(['hysteria', 'hysteria2', 'tuic', 'wireguard']);
-
-function tcpPing(host, port, timeoutMs = 2500) {
-  return new Promise((resolve) => {
-    const started = performance.now();
-    let settled = false;
-    const socket = net.connect({ host, port });
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      const ms = Math.max(1, Math.round(performance.now() - started));
-      socket.destroy();
-      resolve(ok ? ms : null);
-    };
-    socket.setTimeout(timeoutMs, () => finish(false));
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-  });
-}
+import { isUdpProtocol } from './proxy-probe.js';
 
 function snapshotJob(job) {
   if (!job) return null;
@@ -42,9 +22,10 @@ function snapshotJob(job) {
 }
 
 export class Tester {
-  constructor(store, quality) {
+  constructor(store, quality, probe) {
     this.store = store;
     this.quality = quality;
+    this.probe = probe;
     this.job = null;
     this.lastJob = null;
     this.pendingAuto = new Set();
@@ -58,7 +39,7 @@ export class Tester {
   enqueueAuto(nodes, options = {}) {
     const settings = this.store.state.settings;
     const wantQuality = settings.autoQuality !== false;
-    const wantTcp = Boolean(options.tcp ?? settings.autoTcp);
+    const wantTcp = Boolean(options.connect ?? settings.autoConnect ?? settings.autoTcp);
     if (!wantQuality && !wantTcp) return;
     const full = Boolean(options.all);
     const useful = nodes.filter((n) => n && (full || (
@@ -73,7 +54,7 @@ export class Tester {
     }
     const map = new Map(this.store.state.nodes.map((n) => [n.id, n]));
     this.start(useful.map((n) => map.get(n.id) || n).filter(Boolean), {
-      tcp: wantTcp,
+      connect: wantTcp,
       quality: wantQuality,
       label: wantTcp ? '自动测速 + IP 画像' : '自动 IP 画像',
       auto: true,
@@ -88,10 +69,12 @@ export class Tester {
   }
 
   finishCancelled(job) {
-    job.phase = 'cancelled';
+    // 取消请求可能在最后一批结束时才到达，此时结果其实是完整的。
+    const completed = job.done >= job.total && job.total > 0;
+    job.phase = completed ? 'done' : 'cancelled';
     job.running = false;
     job.finishedAt = new Date().toISOString();
-    job.note = `已取消（完成 ${job.done}/${job.total}）`;
+    job.note = completed ? `已完成 ${job.total} 个节点` : `已取消（完成 ${job.done}/${job.total}）`;
     this.lastJob = job;
     this.job = null;
     this.store.addEvent('warn', `${job.label}已取消`);
@@ -106,7 +89,7 @@ export class Tester {
       id: uid(6),
       label: options.label || '手动测速',
       running: true,
-      phase: options.tcp === false ? 'quality' : 'tcp',
+      phase: options.connect === false ? 'quality' : 'connect',
       total: list.length,
       done: 0,
       ok: 0,
@@ -133,45 +116,56 @@ export class Tester {
   }
 
   async run(nodes, job, options) {
-    if (options.tcp !== false) {
-      job.phase = 'tcp';
-      const timeout = Number(this.store.state.settings.tcpTimeoutMs || 2500);
-      const concurrency = Math.max(1, Math.min(64, Number(this.store.state.settings.tcpConcurrency) || 16));
+    if (options.connect !== false) {
+      job.phase = 'connect';
+      const settings = this.store.state.settings;
+      const timeout = Number(settings.connectTimeoutMs || 5000);
       job.timeoutMs = timeout;
-      job.concurrency = Math.min(concurrency, nodes.length);
-      let cursor = 0;
-      const workers = Array.from({ length: job.concurrency }, async () => {
-        while (cursor < nodes.length) {
-          if (job.cancelRequested) break;
-          const node = nodes[cursor++];
-          if (UDP_PROTOCOLS.has(String(node.protocol).toLowerCase())) {
-            node.testedAt = new Date().toISOString();
-            node.testNote = 'UDP 协议（HY2/TUIC 等）不适用 TCP 端口探测；请用站点检测做实际代理连通';
-            if (node.alive === false) node.alive = null;
-            job.skipped += 1;
-            job.done += 1;
-            continue;
-          }
-          const latency = await tcpPing(node.server, node.port, timeout);
-          if (job.cancelRequested) break;
-          node.latency = latency;
-          node.testedAt = new Date().toISOString();
-          node.alive = latency != null;
-          node.testNote = latency != null ? 'TCP 入口可达' : 'TCP 入口不可达';
-          if (latency != null) job.ok += 1;
-          else job.fail += 1;
-          job.done += 1;
-          if (job.done % 12 === 0) this.store.touch();
-        }
+      job.concurrency = Math.min(Math.max(1, Math.min(80, Number(settings.connectConcurrency) || 40)), nodes.length);
+      // 真实的代理握手：HTTP/HTTPS/SOCKS5/HY2/TUIC 全部走同一套 CONNECT，
+      // 因此 UDP 协议也能判定可达，不再被当成「不适用」跳过。
+      const result = await this.probe.probe(nodes, {
+        timeoutMs: timeout,
+        url: settings.testUrl,
+        onProgress: (done, total) => {
+          job.done = done;
+          job.note = `代理握手 ${done}/${total}`;
+        },
+        shouldCancel: () => Boolean(job.cancelRequested),
       });
-      await Promise.all(workers);
+      const now = new Date().toISOString();
+      // 取消也保留已经测出来的结果，只跳过没轮到的节点。
+      for (const node of nodes) {
+        const r = result.results.get(node.id);
+        if (!r) {
+          if (job.cancelRequested) continue;
+          node.testedAt = now;
+          node.alive = false;
+          node.testNote = '代理握手无结果';
+          job.fail += 1;
+          continue;
+        }
+        node.testedAt = now;
+        node.alive = r.ok;
+        node.proxyLatency = r.ok ? r.latency : null;
+        node.latency = r.ok ? r.latency : null;
+        node.connectError = r.ok ? '' : r.error;
+        node.certTrusted = r.certTrusted === undefined ? null : Boolean(r.certTrusted);
+        node.certError = r.certError || '';
+        node.testNote = r.ok
+          ? `${isUdpProtocol(node.protocol) ? 'UDP 代理' : '代理'}握手可达`
+          : `不可达：${r.error}`;
+        if (r.ok && node.certTrusted === false) node.testNote += ' · 证书不受信';
+        if (r.ok) job.ok += 1;
+        else job.fail += 1;
+      }
+      job.done = result.results.size || nodes.length;
+      job.skipped = 0;
+      job.note = `握手完成：${job.ok} 个可达，${job.fail} 个不可达（耗时 ${Math.round(result.elapsed / 1000)} 秒）`;
       this.store.touch();
       if (job.cancelRequested) {
         this.finishCancelled(job);
         return;
-      }
-      if (options.quality === false) {
-        job.phase = 'done';
       }
     }
 
@@ -188,8 +182,8 @@ export class Tester {
           job.note = `IP 情报 ${done}/${total}`;
         },
       });
-      job.note = `画像 ${result.updated}/${nodes.length} 个节点${job.skipped ? ` · ${job.skipped} 个 UDP 节点跳过 TCP 探测` : ''}`;
-      if (before === 0 && options.tcp === false) job.done = nodes.length;
+      job.note = `画像 ${result.updated}/${nodes.length} 个节点`;
+      if (before === 0 && options.connect === false) job.done = nodes.length;
       this.store.addEvent('info', `${job.label}完成：${result.updated} 个节点已更新 IP 画像`);
     }
 
@@ -209,7 +203,7 @@ export class Tester {
         const tcp = this.pendingAutoTcp;
         this.pendingAutoTcp = false;
         setTimeout(() => {
-          this.start(list, { tcp, quality: this.store.state.settings.autoQuality !== false, label: tcp ? '自动测速 + IP 画像' : '自动 IP 画像', auto: true });
+          this.start(list, { connect: tcp, quality: this.store.state.settings.autoQuality !== false, label: tcp ? '自动测速 + IP 画像' : '自动 IP 画像', auto: true });
         }, 500).unref?.();
       }
     }

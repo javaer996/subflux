@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { Store } from './lib/store.js';
 import { QualityService } from './lib/quality.js';
 import { Tester } from './lib/tester.js';
+import { ProxyProbe } from './lib/proxy-probe.js';
 import { Scheduler } from './lib/scheduler.js';
 import { SiteTester } from './lib/site-tester.js';
 import { ChinaTester } from './lib/china-tester.js';
@@ -48,7 +49,8 @@ const store = await new Store(DATA_DIR).init();
 const auth = await new Auth(DATA_DIR).init();
 if (auth.defaultCreds) console.warn('[auth] 正在使用默认账号 admin/subflux，请通过 SUBFLUX_USERNAME / SUBFLUX_PASSWORD 修改');
 const quality = new QualityService(store);
-const tester = new Tester(store, quality);
+const probe = new ProxyProbe(store);
+const tester = new Tester(store, quality, probe);
 const siteTester = new SiteTester(store);
 const chinaTester = new ChinaTester(store);
 const scheduler = new Scheduler(store, tester, siteTester);
@@ -669,14 +671,14 @@ async function handleApi(req, res, url) {
     }
     if (!nodes.length) return apiError(res, 400, '没有匹配的节点可测试');
     const qualityOnly = Boolean(body.qualityOnly);
-    const latencyOnly = Boolean(body.latencyOnly);
+    const connectOnly = Boolean(body.connectOnly ?? body.latencyOnly);
     const job = tester.start(nodes, {
-      tcp: qualityOnly ? false : true,
-      quality: qualityOnly ? true : latencyOnly ? false : true,
-      label: qualityOnly ? '手动 IP 画像' : latencyOnly ? '手动测速' : '手动测速 + IP 画像',
+      connect: qualityOnly ? false : true,
+      quality: qualityOnly ? true : connectOnly ? false : true,
+      label: qualityOnly ? '手动 IP 画像' : connectOnly ? '手动连通性测试' : '手动连通性测试 + IP 画像',
     });
     if (!job) return apiError(res, 409, '测试任务启动失败', { job: tester.status() });
-    store.addEvent('info', `开始测试 ${nodes.length} 个节点（${qualityOnly ? '仅 IP 画像' : latencyOnly ? '仅 TCP 延迟' : 'TCP 延迟 + IP 画像'}）`);
+    store.addEvent('info', `开始测试 ${nodes.length} 个节点（${qualityOnly ? '仅 IP 画像' : connectOnly ? '仅代理握手' : '代理握手 + IP 画像'}）`);
     return sendJson(res, 202, { ok: true, job });
   }
 
@@ -882,6 +884,8 @@ async function handleApi(req, res, url) {
       s.renameTemplate = value.slice(0, 240);
     }
     if (body.autoQuality !== undefined) s.autoQuality = Boolean(body.autoQuality);
+    if (body.autoConnect !== undefined) s.autoConnect = Boolean(body.autoConnect);
+    else if (body.autoTcp !== undefined) s.autoConnect = Boolean(body.autoTcp);
     if (body.autoTcp !== undefined) s.autoTcp = Boolean(body.autoTcp);
     if (body.autoSite !== undefined) s.autoSite = Boolean(body.autoSite);
     let latencyChanged = false;
@@ -891,6 +895,8 @@ async function handleApi(req, res, url) {
       if (next !== s.latencyIntervalMinutes) latencyChanged = true;
       s.latencyIntervalMinutes = next;
     }
+    if (body.connectConcurrency !== undefined) s.connectConcurrency = safeInt(body.connectConcurrency, s.connectConcurrency, 1, 80);
+    if (body.connectTimeoutMs !== undefined) s.connectTimeoutMs = safeInt(body.connectTimeoutMs, s.connectTimeoutMs, 1000, 20000);
     if (body.tcpConcurrency !== undefined) s.tcpConcurrency = safeInt(body.tcpConcurrency, s.tcpConcurrency, 1, 64);
     if (body.fetchProxy !== undefined) {
       const value = String(body.fetchProxy || '').trim();

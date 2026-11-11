@@ -820,7 +820,7 @@ function renderQuickStart() {
       <div class="card-body">
         <div class="steps">
           <div class="step"><span class="step-num">01</span><div><h4>添加订阅源</h4><p>支持 Clash / Mihomo YAML、Base64 与节点链接，多个源可以分别定时刷新。</p></div></div>
-          <div class="step"><span class="step-num">02</span><div><h4>测速与画像</h4><p>测 TCP 入口延迟，并按 ASN 识别家宽、机房、CDN、移动网络，生成质量分。</p></div></div>
+          <div class="step"><span class="step-num">02</span><div><h4>握手与画像</h4><p>让 Mihomo 真正建立一次代理连接测出延迟，并按 ASN 识别家宽、机房、CDN、移动网络，生成质量分。</p></div></div>
           <div class="step"><span class="step-num">03</span><div><h4>生成输出订阅</h4><p>筛选协议、地区、质量，选择客户端格式，自动生成自动选择 + 手动选择分组。</p></div></div>
         </div>
         <div class="divider"></div>
@@ -1274,11 +1274,11 @@ function renderNodes() {
   const enginePath = state.meta.engine?.path || state.meta.siteEnginePath || '';
   return `
     <section class="view">
-      ${pageHead('NODE POOL', '节点池', 'TCP 测速只测入口端口，HY2 / TUIC 等 UDP 协议会被跳过；UDP 节点的实际连通由站点检测确认。IP 类型与入口质量分来自入口 IP 的 ASN 画像。', `
+      ${pageHead('NODE POOL', '节点池', '全部节点由 Mihomo 真实建立一次代理连接来判断可达与延迟，HTTP / HTTPS / SOCKS5 与 HY2 / TUIC / WireGuard 等 UDP 协议一视同仁。IP 类型与入口质量分来自入口 IP 的 ASN 画像。', `
         <button class="btn btn-ghost" data-action="test-selected" ${selectedCount ? '' : 'disabled'}>${ico('play')}<span>测试选中${selectedCount ? ` (${selectedCount})` : ''}</span></button>
         <button class="btn btn-ghost" data-action="test-sites" ${(selectedCount || totalAll) ? '' : 'disabled'} title="${engineReady ? `通过节点真实访问网站，引擎：${enginePath}` : `站点检测引擎不可执行：${enginePath || '未配置'}`}">${ico('globe')}<span>站点检测${selectedCount ? ` (${selectedCount})` : ''}</span>${engineReady ? '' : ' · 引擎缺失'}</button>
         <button class="btn btn-ghost" data-action="test-china" ${(selectedCount || totalAll) && state.meta.chinaProbeConfigured ? '' : 'disabled'} title="${state.meta.chinaProbeConfigured ? '通过中国探针实际代理访问（支持 HY2/TUIC 等 UDP）' : '请先在设置中配置中国探针'}">${ico('server')}<span>CN 实际${selectedCount ? ` (${selectedCount})` : ''}</span></button>
-        <button class="btn btn-primary" data-action="test-filter" ${totalAll ? '' : 'disabled'}>${ico('zap')}<span>测速当前筛选</span></button>
+        <button class="btn btn-primary" data-action="test-filter" ${totalAll ? '' : 'disabled'}>${ico('zap')}<span>握手测试当前筛选</span></button>
       `)}
       <div id="job-slot">${jobBanner()}</div>
       ${renderNodeFilters()}
@@ -1291,7 +1291,7 @@ function renderNodes() {
           </div>
           <div class="right">
             ${selectedCount ? `<button class="link" data-action="clear-selection" style="font-size:10.5px">清空选择</button>` : ''}
-            <button class="btn btn-ghost btn-sm" data-action="test-filter" ${data.total ? '' : 'disabled'}>${ico('activity')}<span>测速筛选结果</span></button>
+            <button class="btn btn-ghost btn-sm" data-action="test-filter" ${data.total ? '' : 'disabled'}>${ico('activity')}<span>测试筛选结果</span></button>
           </div>
         </div>
         ${data.items.length ? nodeTable(data) : nodeEmptyState()}
@@ -1314,7 +1314,7 @@ function jobBanner() {
   const phase = isSite
     ? (job.phase === 'starting' ? '启动检测引擎' : '真实代理访问')
     : isChina ? (job.phase === 'proxy' ? '中国探针实际代理' : '中国探针 TCP 检测')
-    : job.phase === 'tcp' ? 'TCP 入口延迟' : job.phase === 'quality' ? 'IP 情报画像' : '处理中';
+    : job.phase === 'connect' ? '代理握手测试' : job.phase === 'quality' ? 'IP 情报画像' : '处理中';
   return `
     <div class="job-banner" id="job-banner">
       ${ico(isSite ? 'globe' : isChina ? 'server' : 'refresh')}
@@ -1407,7 +1407,7 @@ function renderNodeFilters() {
           <select class="select" data-node-filter="status">
             <option value="all" ${f.status === 'all' ? 'selected' : ''}>全部节点</option>
             <option value="usable" ${f.status === 'usable' ? 'selected' : ''}>可用节点</option>
-            <option value="healthy" ${f.status === 'healthy' ? 'selected' : ''}>TCP 可达</option>
+            <option value="healthy" ${f.status === 'healthy' ? 'selected' : ''}>握手可达</option>
             <option value="untested" ${f.status === 'untested' ? 'selected' : ''}>待画像</option>
             <option value="disabled" ${f.status === 'disabled' ? 'selected' : ''}>已停用</option>
           </select>
@@ -1490,7 +1490,11 @@ function nodeRow(node) {
         </div>
         <div class="tiny dim" style="margin-top:2px" title="${esc(node.qualitySignal || '')}">${esc(node.qualityLabel || '待测')}${node.qualityRisk != null && node.qualityRisk >= 25 ? ` · 风险 ${node.qualityRisk}` : ''}</div>
       </td>
-      <td><span class="latency ${lat}" title="${esc(node.testNote || '')}">${fmtLatency(node.latency)}</span>${node.testNote ? `<div class="tiny dim" title="${esc(node.testNote)}">${esc(node.testNote.includes('UDP') ? 'UDP · 见站点检测' : '')}</div>` : ''}</td>
+      <td>
+        <span class="latency ${lat}" title="${esc(node.testNote || '')}">${fmtLatency(node.latency)}</span>
+        ${node.connectError ? `<div class="tiny dim" title="${esc(node.testNote || node.connectError)}">${esc(node.connectError)}</div>` : ''}
+        ${node.alive && node.certTrusted === false ? `<div class="tiny cert-warn" title="${esc(node.certError || 'TLS 证书校验未通过')}">证书不受信</div>` : ''}
+      </td>
       <td><div style="display:flex;flex-wrap:wrap;gap:4px">${stateHtml}${cnBadge(node)}</div></td>
       <td>
         <div class="row-actions">
@@ -1621,7 +1625,7 @@ async function startNodeTest(options = {}) {
     if (options.ids) payload.ids = options.ids;
     else payload.filter = options.filter || nodeFilterPayload();
     if (options.qualityOnly) payload.qualityOnly = true;
-    if (options.latencyOnly) payload.latencyOnly = true;
+    if (options.connectOnly || options.latencyOnly) payload.connectOnly = true;
     const data = await api('/api/nodes/test', { method: 'POST', body: JSON.stringify(payload) });
     toast(`测试任务已启动：${data.job.total} 个节点`, 'success');
     App.fastPoll = true;
@@ -1801,7 +1805,7 @@ function profileCard(profile) {
         </div>
       </div>
       <div class="profile-foot">
-        <span class="time">${profile.testUrl ? '自定义测试地址' : '全局测试地址'} · ${profile.filters.onlyAlive ? '仅 TCP 可达' : '包含未测速'}</span>
+        <span class="time">${profile.testUrl ? '自定义测试地址' : '全局测试地址'} · ${profile.filters.onlyAlive ? '仅握手可达' : '包含不可达'}</span>
         <div class="profile-actions">
           <button class="btn btn-ghost btn-sm" data-action="preview-profile" data-id="${esc(profile.id)}">${ico('eye')}<span>预览</span></button>
           <button class="btn btn-ghost btn-sm" data-action="rotate-profile" data-id="${esc(profile.id)}" title="轮换订阅令牌">${ico('rotate')}</button>
@@ -1821,7 +1825,7 @@ function profileFilterTags(profile) {
   }
   if (Number(f.minQuality) > 0) tags.push(`质量 <em>≥ ${f.minQuality}</em>`);
   if (Number(f.maxLatency) > 0) tags.push(`延迟 <em>≤ ${f.maxLatency} ms</em>`);
-  if (f.onlyAlive) tags.push('<em>仅 TCP 可达</em>');
+  if (f.onlyAlive) tags.push('<em>仅握手可达</em>');
   if (f.sourceIds?.length) tags.push(`来源 <em>${f.sourceIds.length} 个</em>`);
   if (f.sites?.length) {
     const siteMap = new Map((App.state.settings.sites || []).map((s) => [s.id, s.short]));
@@ -2042,9 +2046,9 @@ function openProfileModal(profile = null) {
           <div class="field-hint">0 表示不限；80+ 通常为家宽 / 优质移动网络。</div>
         </div>
         <div class="field">
-          <label for="profile-latency">最大 TCP 延迟（ms）</label>
+          <label for="profile-latency">最大握手延迟（ms）</label>
           <input class="input" id="profile-latency" name="maxLatency" type="number" min="0" max="600000" step="10" value="${Number(f.maxLatency) || 0}" placeholder="0 = 不限">
-          <div class="field-hint">未测速节点会被排除；0 表示不限制。</div>
+          <div class="field-hint">握手失败（不可达）的节点会被排除；0 表示不限制。</div>
         </div>
       </div>
       <div class="field" style="max-height:190px;overflow:auto;padding-right:4px">
@@ -2082,7 +2086,7 @@ function openProfileModal(profile = null) {
           <div class="field-hint">按国家/地区分别计数，超出部分丢弃；填 0 表示不限制。比如填 3，同一国家最多只输出 3 个。</div>
         </div>
         <div class="field">
-          <label>只保留 TCP 可达节点</label>
+          <label>只保留握手可达节点</label>
           <div class="field-row" style="padding-top:4px">
             <span class="field-hint">需要先完成测速</span>
             <label class="switch"><input type="checkbox" name="onlyAlive" ${f.onlyAlive ? 'checked' : ''}><span class="track"></span></label>
@@ -2552,7 +2556,7 @@ function renderTasks() {
   if (!state) return '';
   const queues = state.meta.queues || {};
   const jobs = [
-    { title: '延迟测速', icon: 'activity', job: state.job, queue: queues.latency, kind: 'latency' },
+    { title: '握手测速', icon: 'activity', job: state.job, queue: queues.latency, kind: 'latency' },
     { title: '站点检测', icon: 'globe', job: state.siteJob, queue: queues.site, kind: 'site' },
     { title: 'CN 实际检测', icon: 'server', job: state.chinaJob, queue: 0, kind: 'china' },
   ];
@@ -2565,7 +2569,7 @@ function renderTasks() {
   const events = (state.events || []).slice(0, 8);
   return `
     <section class="view">
-      ${pageHead('TASKS', '任务中心', `当前 ${running.length + refreshing.length} 个任务在跑。测速、站点检测、CN 检测各自同时只跑一个，后来的任务排队等待；不同订阅源的刷新可以并行，刷新和检测也可以同时进行。`, `<button class="btn btn-primary" data-action="test-all">${ico('activity')}<span>立即测速全部</span></button>`)}
+      ${pageHead('TASKS', '任务中心', `当前 ${running.length + refreshing.length} 个任务在跑。测速、站点检测、CN 检测各自同时只跑一个，后来的任务排队等待；不同订阅源的刷新可以并行，刷新和检测也可以同时进行。`, `<button class="btn btn-primary" data-action="test-all">${ico('activity')}<span>立即握手测试全部</span></button>`)}
       <div class="task-grid">
         ${jobs.map((item) => taskCard(item.title, item.icon, item.job, item.queue, item.kind)).join('')}
         <div class="card task-card">
@@ -2589,11 +2593,11 @@ function renderTasks() {
             <thead><tr><th>任务</th><th>间隔</th><th>下次</th><th>上次</th><th>状态</th></tr></thead>
             <tbody>
               <tr>
-                <td>延迟测速</td>
+                <td>握手测速</td>
                 <td>${latencyOff ? '—' : `${fmtNum(s.latencyIntervalMinutes || 60)} 分钟`}</td>
                 <td>${latencyOff ? '已关闭' : `${fmtTime(s.latencyNextAt)}（${relTime(s.latencyNextAt)}）`}</td>
                 <td>${fmtTime(s.latencyLastAt)}</td>
-                <td>${latencyOff ? '<span class="badge badge-muted">已关闭</span>' : '<span class="badge badge-mint">已开启</span>'} · 并发 ${fmtNum(s.tcpConcurrency || 16)} · 超时 ${fmtNum(s.tcpTimeoutMs || 2500)} ms</td>
+                <td>${latencyOff ? '<span class="badge badge-muted">已关闭</span>' : '<span class="badge badge-mint">已开启</span>'} · 并发 ${fmtNum(s.connectConcurrency ?? 40)} · 超时 ${fmtNum(s.connectTimeoutMs ?? 5000)} ms</td>
               </tr>
               ${scheduledSources.map((source) => `
                 <tr>
@@ -2694,8 +2698,9 @@ function renderSettings() {
                   <input class="input" id="setting-request-timeout" name="requestTimeoutMs" type="number" min="5000" max="90000" step="1000" value="${s.requestTimeoutMs}">
                 </div>
                 <div class="field">
-                  <label for="setting-tcp-timeout">TCP 测速超时（毫秒）</label>
-                  <input class="input" id="setting-tcp-timeout" name="tcpTimeoutMs" type="number" min="500" max="10000" step="100" value="${s.tcpTimeoutMs}">
+                  <label for="setting-connect-timeout">握手测试超时（毫秒）</label>
+                  <input class="input" id="setting-connect-timeout" name="connectTimeoutMs" type="number" min="1000" max="20000" step="500" value="${s.connectTimeoutMs ?? 5000}">
+                  <div class="field-hint">每个节点建立一次真实代理连接的最长等待，超时即判不可达。</div>
                 </div>
                 <div class="field">
                   <label for="setting-max-nodes">单源节点上限</label>
@@ -2716,8 +2721,8 @@ function renderSettings() {
                   <label class="switch"><input type="checkbox" name="autoQuality" ${s.autoQuality !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
                 <div class="field-row card card-pad" style="padding:11px 13px">
-                  <div><div class="field-label">刷新后自动连通 / 延迟检测</div><div class="field-hint">刷新后对该源全部节点重新测 TCP 入口；UDP 节点由站点检测补实际连通</div></div>
-                  <label class="switch"><input type="checkbox" name="autoTcp" ${s.autoTcp !== false ? 'checked' : ''}><span class="track"></span></label>
+                  <div><div class="field-label">刷新后自动握手测速</div><div class="field-hint">刷新后对该源全部节点重新做代理握手，TCP 与 UDP 协议都测</div></div>
+                  <label class="switch"><input type="checkbox" name="autoConnect" ${(s.autoConnect ?? s.autoTcp) !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
                 <div class="field-row card card-pad" style="padding:11px 13px">
                   <div><div class="field-label">刷新后自动站点检测</div><div class="field-hint">只检测还没有站点结果的新节点，不设数量上限</div></div>
@@ -2741,7 +2746,7 @@ function renderSettings() {
 
           <div class="card settings-section">
             <h2>定时测速</h2>
-            <div class="desc">按固定间隔重新测所有节点的 TCP 入口延迟。只探测端口，不走代理；HY2 / TUIC 等 UDP 节点会跳过。</div>
+            <div class="desc">按固定间隔让 Mihomo 对每个节点真实发起一次代理连接，HTTP / HTTPS / SOCKS5 与 HY2 / TUIC / WireGuard 等 UDP 协议统一判定可达。</div>
             <div class="form-grid">
               <div class="field-row card card-pad span-2" style="padding:11px 13px">
                 <div><div class="field-label">启用定时测速</div><div class="field-hint">到点时如果已有测速任务在跑，会等它结束后再开始；站点检测可以同时进行</div></div>
@@ -2762,9 +2767,9 @@ function renderSettings() {
                 <div class="field-hint">下次 ${s.latencyAuto === false ? '—' : esc(fmtTime(s.latencyNextAt))} · 上次 ${esc(fmtTime(s.latencyLastAt))}</div>
               </div>
               <div class="field">
-                <label for="setting-tcp-concurrency">测速并发</label>
-                <input class="input" id="setting-tcp-concurrency" name="tcpConcurrency" type="number" min="1" max="64" step="1" value="${s.tcpConcurrency || 16}">
-                <div class="field-hint">同时探测的节点数，超时用上面的「TCP 测速超时」。400 个节点、16 并发、2.5 秒超时，最坏约 1 分钟跑完。</div>
+                <label for="setting-connect-concurrency">握手并发</label>
+                <input class="input" id="setting-connect-concurrency" name="connectConcurrency" type="number" min="1" max="80" step="1" value="${s.connectConcurrency ?? 40}">
+                <div class="field-hint">同时交给内核测试的节点数，超时用上面的「握手测试超时」。留足 40 以上能明显缩短大批量测试时间。</div>
               </div>
             </div>
           </div>
@@ -3013,17 +3018,17 @@ function bindSettings() {
       proxycheckKey: String(fd.get('proxycheckKey') || '').trim(),
       proxycheckPerDay: Number(fd.get('proxycheckPerDay')) || 0,
       requestTimeoutMs: Number(fd.get('requestTimeoutMs')) || 25000,
-      tcpTimeoutMs: Number(fd.get('tcpTimeoutMs')) || 2500,
+      connectTimeoutMs: Number(fd.get('connectTimeoutMs')) || 5000,
       maxNodesPerSource: Number(fd.get('maxNodesPerSource')) || 3000,
       userAgent: String(fd.get('userAgent') || ''),
       renameTemplate: String(fd.get('renameTemplate') || ''),
       autoRefresh: fd.get('autoRefresh') === 'on',
       autoQuality: fd.get('autoQuality') === 'on',
-      autoTcp: fd.get('autoTcp') === 'on',
+      autoConnect: fd.get('autoConnect') === 'on',
       autoSite: fd.get('autoSite') === 'on',
       latencyAuto: fd.get('latencyAuto') === 'on',
       latencyIntervalMinutes: Number(fd.get('latencyIntervalMinutes')) || 60,
-      tcpConcurrency: Number(fd.get('tcpConcurrency')) || 16,
+      connectConcurrency: Number(fd.get('connectConcurrency')) || 40,
       fetchProxy: String(fd.get('fetchProxy') || '').trim(),
       chinaProbeUrl: String(fd.get('chinaProbeUrl') || '').trim(),
       chinaProbeToken: String(fd.get('chinaProbeToken') || '').trim(),
@@ -3523,7 +3528,7 @@ function bindGlobalEvents() {
       return copyText(subUrl(profile), '订阅链接已复制');
     }
     if (action === 'test-filter') return startNodeTest();
-    if (action === 'test-all') return startNodeTest({ filter: { status: 'all' }, latencyOnly: true });
+    if (action === 'test-all') return startNodeTest({ filter: { status: 'all' }, connectOnly: true });
     if (action === 'cancel-task') return cancelTask(kind);
     if (action === 'logout') return doLogout();
     if (action === 'test-china') {

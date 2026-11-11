@@ -18,9 +18,12 @@ export const DEFAULT_SETTINGS = {
   proxycheckKey: '',
   proxycheckPerDay: 90,
   tcpTimeoutMs: 2500,
+  connectTimeoutMs: 5000,
+  connectConcurrency: 40,
   requestTimeoutMs: 25000,
   autoRefresh: true,
   autoTcp: true,
+  autoConnect: true,
   autoSite: true,
   latencyAuto: true,
   latencyIntervalMinutes: 60,
@@ -173,6 +176,14 @@ export class Store extends EventEmitter {
     state.settings.proxycheckKey = cleanText(data.settings?.proxycheckKey, 200);
     const pcPerDay = Number.parseInt(data.settings?.proxycheckPerDay, 10);
     state.settings.proxycheckPerDay = Number.isFinite(pcPerDay) ? clamp(pcPerDay, 0, 2000) : DEFAULT_SETTINGS.proxycheckPerDay;
+    // 老版本只有 autoTcp（TCP 端口探测），迁移到 autoConnect 时沿用用户的开关意图。
+    if (data.settings?.autoConnect === undefined && data.settings?.autoTcp !== undefined) {
+      state.settings.autoConnect = data.settings.autoTcp !== false;
+    }
+    const connTimeout = Number.parseInt(data.settings?.connectTimeoutMs, 10);
+    state.settings.connectTimeoutMs = Number.isFinite(connTimeout) ? clamp(connTimeout, 1000, 20000) : DEFAULT_SETTINGS.connectTimeoutMs;
+    const connConc = Number.parseInt(data.settings?.connectConcurrency, 10);
+    state.settings.connectConcurrency = Number.isFinite(connConc) ? clamp(connConc, 1, 80) : DEFAULT_SETTINGS.connectConcurrency;
   state.settings.subBaseUrl = cleanText(data.settings?.subBaseUrl, 500).replace(/\/+$/, '');
     // Repair profile filter/group shapes from older snapshots.
     state.profiles = state.profiles.map((p) => {

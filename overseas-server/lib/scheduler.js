@@ -87,7 +87,7 @@ export class Scheduler {
   }
 
   /**
-   * 定时测速：只测 TCP 入口延迟，不做 IP 画像。
+   * 定时测速：用 Mihomo 真实握手测连通性与延迟（TCP/UDP 协议一致），不做 IP 画像。
    * 如果当前已有测速任务，本轮跳过，等任务结束后下一个 tick 再补跑。
    */
   async runLatencyTest() {
@@ -104,8 +104,8 @@ export class Scheduler {
     settings.latencyNextAt = new Date(Date.now() + interval * 60_000).toISOString();
     this.store.touch();
     if (!nodes.length) return null;
-    const job = this.tester.start(nodes, { tcp: true, quality: false, label: '定时测速', auto: true });
-    if (job) this.store.addEvent('info', `定时测速开始：${nodes.length} 个节点`);
+    const job = this.tester.start(nodes, { connect: true, quality: false, label: '定时握手测速', auto: true });
+    if (job) this.store.addEvent('info', `定时握手测速开始：${nodes.length} 个节点`);
     return job;
   }
 
