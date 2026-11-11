@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { uid, clamp, cleanText } from './util.js';
 import { DEFAULT_SITES, normalizeSites } from './sites.js';
 import { DEFAULT_ROUTING, normalizeRouting, normalizeRuleList, parseCustomRules } from './routing.js';
+import { initSecrets, encryptState, decryptState, hasPlaintextSecrets } from './secrets.js';
 
 export const DEFAULT_SETTINGS = {
   testUrl: 'https://www.gstatic.com/generate_204',
@@ -122,10 +123,11 @@ export class Store extends EventEmitter {
 
   async init() {
     await fs.mkdir(this.dataDir, { recursive: true });
+    await initSecrets(this.dataDir);
+    let data;
     try {
       const raw = await fs.readFile(this.file, 'utf8');
-      const data = JSON.parse(raw);
-      this.state = this.migrate(data);
+      data = JSON.parse(raw);
     } catch (err) {
       if (err.code !== 'ENOENT') {
         console.error('[store] 数据文件读取失败，将使用新数据:', err.message);
@@ -137,7 +139,11 @@ export class Store extends EventEmitter {
       }
       this.state = defaultState();
       await this.flush();
+      return this;
     }
+    // 解密失败必须直接报错，绝不能当成损坏文件覆盖。
+    this.state = this.migrate(decryptState(data));
+    if (hasPlaintextSecrets(this.state)) await this.flush();
     return this;
   }
 
@@ -260,10 +266,11 @@ export class Store extends EventEmitter {
       return;
     }
     const tmp = `${this.file}.tmp`;
-    const body = JSON.stringify(this.state);
+    const body = JSON.stringify(encryptState(this.state));
     this._writing = (async () => {
-      await fs.writeFile(tmp, body, 'utf8');
+      await fs.writeFile(tmp, body, { encoding: 'utf8', mode: 0o600 });
       await fs.rename(tmp, this.file);
+      await fs.chmod(this.file, 0o600).catch(() => {});
     })();
     try {
       await this._writing;

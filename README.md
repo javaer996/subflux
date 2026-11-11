@@ -57,7 +57,7 @@ docker compose up -d
 宿主机目录：
 
 ```text
-./data                  db.json
+./data                  db.json、logs/、.secret-key、.session-secret
 ./cache/node_modules    依赖（跨重启复用）
 ./cache/npm             npm 缓存
 ./cache/mihomo          mihomo 二进制
@@ -91,11 +91,11 @@ Mihomo 默认按容器架构从 GitHub Releases 下载（`amd64-compatible` / `a
 ```bash
 cd overseas-server
 npm install
-./start.sh          # 后台启动，日志在 server.log
+./start.sh          # 后台启动，日志在 data/logs/app-YYYY-MM-DD.log
 # 或 node server.js
 ```
 
-打开 `http://<主机IP>:8888`。
+打开 `http://<主机IP>:8888`，首次会跳到登录页；默认账号 `admin` / `subflux`，请通过环境变量修改。
 
 `bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `overseas-server/bin/README.md` 下载，或设置 `MIHOMO_BIN`。也可以用 Docker Compose（引擎自动下载到 `/opt/mihomo/mihomo`），或在面板「设置 → 站点解锁检测 → Mihomo 引擎路径」里直接填绝对路径。找不到引擎时面板仍可启动，但站点检测、自动站点检测和 CN 实际检测不可用。
 
@@ -105,7 +105,11 @@ npm install
 | --- | --- | --- |
 | `PORT` | `8888` | 监听端口 |
 | `HOST` | `0.0.0.0` | 绑定地址 |
-| `DATA_DIR` | `./data` | 数据目录 |
+| `DATA_DIR` | `./data` | 数据目录（db.json、logs、密钥） |
+| `SUBFLUX_USERNAME` | `admin` | 面板登录用户名 |
+| `SUBFLUX_PASSWORD` | `subflux` | 面板登录密码，**部署后请立即修改** |
+| `SUBFLUX_SESSION_SECRET` | 自动生成 | 会话签名密钥（≥16 字符），留空则写入 `data/.session-secret` |
+| `SUBFLUX_SECRET_KEY` | 自动生成 | 敏感字段加密密钥（≥16 字符），留空则写入 `data/.secret-key`；设置后不要随意更换 |
 | `MIHOMO_BIN` | 自动查找 | 站点检测引擎路径；未设置时依次尝试 `/opt/mihomo/mihomo`（compose 默认下载位置）→ `bin/mihomo` |
 
 ## 使用流程
@@ -142,7 +146,10 @@ http://<host>:8888/sub/<token>/plain
 - **按需输出**：每个订阅可限制最多返回多少条（0 = 不限），也支持链接上加 `?limit=N` 临时覆盖；每次请求都按最新节点池实时生成。
 - **定时推送**：每个输出订阅可按间隔推送到服务器本地文件、HTTP 地址，或阿里云 OSS / S3 兼容对象存储。
 - **定时测速**：按间隔自动重测全部节点的 TCP 入口延迟，并发与超时都可调，也可以一键全测。
-- **任务中心**：集中查看延迟测速、站点检测、CN 检测、订阅刷新和推送的进度与下次执行时间。
+- **任务中心**：集中查看延迟测速、站点检测、CN 检测、订阅刷新和推送的进度与下次执行时间，运行中的任务可以取消。
+- **登录认证**：面板页面和 `/api` 需要登录；账号通过 `SUBFLUX_USERNAME` / `SUBFLUX_PASSWORD` 配置，订阅链接 `/sub/<token>` 仍用令牌认证。
+- **敏感数据加密**：db.json 里的订阅令牌、节点凭据、OSS AccessKey、探针 Token 等字段用 AES-256-GCM 加密，密钥在 `data/.secret-key`（0600）。
+- **日志保留**：应用日志按天写入 `data/logs/`，只保留最近 24 小时；容器日志由 compose 限制为 10MB × 1。
 - **刷新周期**：订阅源刷新间隔不设七天上限，可以按需设到任意长；快捷按钮提供 7 / 14 / 30 天。
 - **订阅源导出 / 导入**：把全部订阅源导出成 JSON，换机器时导入即可；合并导入会跳过重复链接，不影响现有订阅源。
 

@@ -69,6 +69,10 @@ services:
       MIHOMO_MIRROR: ${MIHOMO_MIRROR:-}
       INSTALL_MIHOMO: ${INSTALL_MIHOMO:-1}
       NODE_OPTIONS: --max-old-space-size=256
+      SUBFLUX_USERNAME: ${SUBFLUX_USERNAME:-admin}
+      SUBFLUX_PASSWORD: ${SUBFLUX_PASSWORD:-subflux}
+      SUBFLUX_SESSION_SECRET: ${SUBFLUX_SESSION_SECRET:-}
+      SUBFLUX_SECRET_KEY: ${SUBFLUX_SECRET_KEY:-}
     ports:
       - "${SUBFLUX_PORT:-8888}:8888"
     volumes:
@@ -88,6 +92,11 @@ services:
       retries: 5
       start_period: 60s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "1"
 
 volumes:
   subflux-src:

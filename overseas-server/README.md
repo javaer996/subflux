@@ -7,17 +7,21 @@
 ```bash
 cd overseas-server
 npm install
-./start.sh      # 后台启动，日志写入 server.log
+./start.sh      # 后台启动，日志写入 data/logs/app-YYYY-MM-DD.log（保留 24 小时）
 # 或 node server.js
 ```
 
-默认监听 `0.0.0.0:8888`，打开 `http://<主机IP>:8888`。
+默认监听 `0.0.0.0:8888`，打开 `http://<主机IP>:8888` 会跳到登录页。默认账号 `admin` / `subflux`，请用环境变量覆盖。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PORT` | `8888` | 监听端口 |
 | `HOST` | `0.0.0.0` | 绑定地址 |
-| `DATA_DIR` | `./data` | 数据目录 |
+| `DATA_DIR` | `./data` | 数据目录（db.json、logs、密钥） |
+| `SUBFLUX_USERNAME` | `admin` | 面板登录用户名 |
+| `SUBFLUX_PASSWORD` | `subflux` | 面板登录密码，部署后请立即修改 |
+| `SUBFLUX_SESSION_SECRET` | 自动生成 | 会话签名密钥（≥16 字符），留空写入 `data/.session-secret` |
+| `SUBFLUX_SECRET_KEY` | 自动生成 | 敏感字段加密密钥（≥16 字符），留空写入 `data/.secret-key`；设置后不要更换 |
 | `MIHOMO_BIN` | 自动查找 | 站点检测引擎路径；未设置时依次尝试 `/opt/mihomo/mihomo`（compose 默认下载位置）→ `bin/mihomo` |
 
 `bin/mihomo` 不入库（约 55MB，区分架构），首次部署按 `bin/README.md` 下载，或设置 `MIHOMO_BIN`。引擎查找顺序是：设置里的路径 → `MIHOMO_BIN` → `/opt/mihomo/mihomo`（Docker Compose 默认下载位置）→ 项目内置 `bin/mihomo`；面板「设置 → 站点解锁检测」里可以看到当前解析到哪个路径。找不到引擎时面板仍可启动，但站点检测、自动站点检测和 CN 实际检测不可用。
@@ -54,7 +58,30 @@ npm install
 
 关闭「自动刷新」的订阅源不参与定时任务，卡片上会标「仅手动刷新」；点卡片上的刷新按钮或「全部刷新」仍会抓取，只是抓完不排下一次。
 
+## 登录认证
+
+面板页面和所有 `/api` 接口都需要登录；订阅输出 `/sub/<token>` 仍使用令牌认证，客户端不需要账号。账号通过环境变量配置：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SUBFLUX_USERNAME` | `admin` | 登录用户名 |
+| `SUBFLUX_PASSWORD` | `subflux` | 登录密码，至少 4 位 |
+| `SUBFLUX_SESSION_SECRET` | 自动生成 | 会话 Cookie 签名密钥，留空则生成 `data/.session-secret` |
+
+- 登录后签发 7 天有效的 HttpOnly + SameSite=Lax 会话 Cookie；反向代理走 HTTPS 时自动加 `Secure`。
+- 所有写接口校验 `x-csrf-token`（前端自动携带），登录失败按 IP 限速：10 分钟内 5 次失败封禁 15 分钟。
+- 侧栏底部「退出登录」会清除会话并回到登录页。
+
+## 数据加密与日志
+
+- **加密范围**：`settings.chinaProbeToken`、`settings.fetchProxy`、订阅源的 URL / 文本内容 / 拉取代理、节点的 `raw` 与 `uri`、推送目标的 URL / AccessKey / 请求头。
+- **算法**：AES-256-GCM，落盘格式 `enc:v1:<base64>`；内存中仍是明文，读写对业务透明。
+- **密钥**：默认 `data/.secret-key`（首次启动生成，权限 0600）；也可以用 `SUBFLUX_SECRET_KEY` 指定。**更换密钥会导致旧数据无法解密，服务会直接报错退出而不是覆盖数据**；迁移或备份时必须把 `.secret-key` 与 `db.json` 一起带走。
+- **日志**：应用日志写到 `data/logs/app-YYYY-MM-DD.log`，启动时和每小时清理超过 24 小时的文件；`start.sh` 把标准输出写入 `data/logs/boot.log`（每次启动覆盖）。Docker 部署额外由 compose 限制 `max-size=10m`、`max-file=1`。
+
 ## 定时测速与任务中心
+
+任务中心里运行中的延迟测速、站点检测、CN 检测都可以点「取消」，已完成的节点会保留结果。
 
 「设置 → 定时测速」可以按固定间隔重新测所有节点的 TCP 入口延迟，默认开启、60 分钟一次；间隔可自定义（快捷 15 分 / 30 分 / 1 小时 / 3 小时 / 6 小时 / 12 小时 / 24 小时）。「测速并发」控制同时探测的节点数（1–64，默认 16），超时时间用同一页的「TCP 测速超时」（默认 2500 ms）。
 

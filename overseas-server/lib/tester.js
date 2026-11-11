@@ -80,6 +80,24 @@ export class Tester {
     });
   }
 
+  cancel() {
+    if (!this.job?.running) return false;
+    this.job.cancelRequested = true;
+    this.job.note = '正在取消…';
+    return true;
+  }
+
+  finishCancelled(job) {
+    job.phase = 'cancelled';
+    job.running = false;
+    job.finishedAt = new Date().toISOString();
+    job.note = `已取消（完成 ${job.done}/${job.total}）`;
+    this.lastJob = job;
+    this.job = null;
+    this.store.addEvent('warn', `${job.label}已取消`);
+    this.store.touch();
+  }
+
   start(nodes, options = {}) {
     if (this.job?.running) return null;
     const list = nodes.filter(Boolean);
@@ -124,6 +142,7 @@ export class Tester {
       let cursor = 0;
       const workers = Array.from({ length: job.concurrency }, async () => {
         while (cursor < nodes.length) {
+          if (job.cancelRequested) break;
           const node = nodes[cursor++];
           if (UDP_PROTOCOLS.has(String(node.protocol).toLowerCase())) {
             node.testedAt = new Date().toISOString();
@@ -134,6 +153,7 @@ export class Tester {
             continue;
           }
           const latency = await tcpPing(node.server, node.port, timeout);
+          if (job.cancelRequested) break;
           node.latency = latency;
           node.testedAt = new Date().toISOString();
           node.alive = latency != null;
@@ -146,9 +166,18 @@ export class Tester {
       });
       await Promise.all(workers);
       this.store.touch();
+      if (job.cancelRequested) {
+        this.finishCancelled(job);
+        return;
+      }
       if (options.quality === false) {
         job.phase = 'done';
       }
+    }
+
+    if (job.cancelRequested) {
+      this.finishCancelled(job);
+      return;
     }
 
     if (options.quality !== false) {

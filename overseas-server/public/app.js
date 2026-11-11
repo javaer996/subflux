@@ -88,6 +88,7 @@ const App = {
   nodePage: 1,
   nodePageSize: 50,
   selected: new Set(),
+  csrf: '',
   sourceQuery: '',
   pollTimer: null,
   fastPoll: false,
@@ -286,13 +287,19 @@ function debounce(fn, wait) {
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
   const res = await fetch(path, {
     ...options,
     headers: {
       ...(options.body ? { 'content-type': 'application/json' } : {}),
+      ...(method !== 'GET' && App.csrf ? { 'x-csrf-token': App.csrf } : {}),
       ...(options.headers || {}),
     },
   });
+  if (res.status === 401 && !String(path).startsWith('/api/auth/')) {
+    window.location.href = '/login';
+    throw new Error('登录已过期，请重新登录');
+  }
   const type = res.headers.get('content-type') || '';
   const data = type.includes('application/json') ? await res.json() : await res.text();
   if (!res.ok) {
@@ -1586,6 +1593,27 @@ function restoreNodeSearchFocus() {
   });
 }
 
+async function cancelTask(kind) {
+  if (!kind) return;
+  try {
+    await api('/api/tasks/cancel', { method: 'POST', body: JSON.stringify({ kind }) });
+    toast('已请求取消任务', 'success');
+    await refreshState(false);
+    render();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function doLogout() {
+  try {
+    await api('/api/auth/logout', { method: 'POST' });
+  } catch {
+    // 忽略退出请求错误，直接回登录页。
+  }
+  window.location.replace('/login');
+}
+
 async function startNodeTest(options = {}) {
   try {
     const payload = {};
@@ -2466,7 +2494,7 @@ function taskProgress(job) {
     <div class="task-sub">${fmtNum(job.done)} / ${fmtNum(job.total)} · ${pct}%${job.skipped ? ` · 跳过 ${fmtNum(job.skipped)}` : ''}</div>`;
 }
 
-function taskCard(title, icon, job, queue) {
+function taskCard(title, icon, job, queue, kind) {
   const running = Boolean(job && job.running);
   const last = job && !job.running ? job : null;
   let body = '<div class="task-sub">还没有运行记录</div>';
@@ -2484,6 +2512,7 @@ function taskCard(title, icon, job, queue) {
         <span class="task-icon">${ico(icon)}</span>
         <strong>${esc(title)}</strong>
         ${running ? '<span class="badge badge-blue">运行中</span>' : '<span class="badge badge-muted">空闲</span>'}
+        ${running && kind ? `<button class="btn btn-sm task-cancel" data-action="cancel-task" data-kind="${kind}">取消</button>` : ''}
       </div>
       ${body}
       ${queue ? `<div class="task-sub">队列中还有 ${fmtNum(queue)} 个节点</div>` : ''}
@@ -2495,9 +2524,9 @@ function renderTasks() {
   if (!state) return '';
   const queues = state.meta.queues || {};
   const jobs = [
-    { title: '延迟测速', icon: 'activity', job: state.job, queue: queues.latency },
-    { title: '站点检测', icon: 'globe', job: state.siteJob, queue: queues.site },
-    { title: 'CN 实际检测', icon: 'server', job: state.chinaJob, queue: 0 },
+    { title: '延迟测速', icon: 'activity', job: state.job, queue: queues.latency, kind: 'latency' },
+    { title: '站点检测', icon: 'globe', job: state.siteJob, queue: queues.site, kind: 'site' },
+    { title: 'CN 实际检测', icon: 'server', job: state.chinaJob, queue: 0, kind: 'china' },
   ];
   const running = jobs.filter((item) => item.job?.running);
   const refreshing = state.sources.filter((source) => source.status === 'refreshing');
@@ -2510,7 +2539,7 @@ function renderTasks() {
     <section class="view">
       ${pageHead('TASKS', '任务中心', `当前 ${running.length + refreshing.length} 个任务在跑。测速、站点检测、CN 检测各自同时只跑一个，后来的任务排队等待；不同订阅源的刷新可以并行，刷新和检测也可以同时进行。`, `<button class="btn btn-primary" data-action="test-all">${ico('activity')}<span>立即测速全部</span></button>`)}
       <div class="task-grid">
-        ${jobs.map((item) => taskCard(item.title, item.icon, item.job, item.queue)).join('')}
+        ${jobs.map((item) => taskCard(item.title, item.icon, item.job, item.queue, item.kind)).join('')}
         <div class="card task-card">
           <div class="task-head">
             <span class="task-icon">${ico('rss')}</span>
@@ -2583,11 +2612,18 @@ function renderSettings() {
   const tokens = ['{flag}', '{region}', '{type}', '{quality}', '{score}', '{seq:02}', '{isp}', '{asn}', '{protocol}', '{source}', '{sites}', '{name}'];
   return `
     <section class="view">
-      ${pageHead('SYSTEM', '设置与说明', '调整刷新、测速、命名与数据策略。面板只在本机运行，不做账号体系，请控制网络暴露范围。', `
+      ${pageHead('SYSTEM', '设置与说明', '调整刷新、测速、命名与数据策略。面板已启用登录认证，账号由容器环境变量配置。', `
         <button class="btn btn-primary" type="submit" form="settings-form">${ico('check')}<span>保存设置</span></button>
       `)}
       <div class="settings-grid">
         <form id="settings-form" class="stack" autocomplete="off">
+          <div class="card settings-section">
+            <h2>登录认证</h2>
+            <div class="desc">面板页面和 /api 接口需要登录；订阅链接 /sub/&lt;token&gt; 仍使用令牌认证，客户端不受影响。</div>
+            <div class="field-hint">当前账号：<b>${esc(meta.auth?.username || 'admin')}</b>。修改容器环境变量 SUBFLUX_USERNAME / SUBFLUX_PASSWORD 后重启生效。</div>
+            ${meta.auth?.defaultCreds ? '<div class="field-hint" style="color:#f5b75a">正在使用默认账号密码，请尽快在 .env 中修改。</div>' : ''}
+            <div class="field-hint">db.json 中的订阅令牌、节点凭据、OSS AccessKey、探针 Token 等字段使用 AES-256-GCM 加密，密钥保存在 data/.secret-key（权限 0600）。</div>
+          </div>
           <div class="card settings-section">
             <h2>订阅访问地址</h2>
             <div class="desc">生成订阅链接和二维码时使用的地址前缀，可以填别的域名或公网 IP，不必是面板当前的访问地址。</div>
@@ -3391,6 +3427,7 @@ function bindGlobalEvents() {
     if (!actionEl) return;
     const action = actionEl.dataset.action;
     const id = actionEl.dataset.id;
+    const kind = actionEl.dataset.kind;
     if (action === 'toggle-sidebar') {
       event.preventDefault();
       document.body.classList.toggle('sidebar-open');
@@ -3447,6 +3484,8 @@ function bindGlobalEvents() {
     }
     if (action === 'test-filter') return startNodeTest();
     if (action === 'test-all') return startNodeTest({ filter: { status: 'all' }, latencyOnly: true });
+    if (action === 'cancel-task') return cancelTask(kind);
+    if (action === 'logout') return doLogout();
     if (action === 'test-china') {
       if (!App.selected.size && !App.state.stats.nodes.total) return toast('没有可检测的节点', 'warn');
       return startChinaTest(App.selected.size ? { ids: [...App.selected] } : {});
@@ -3594,6 +3633,13 @@ async function boot() {
   hydrateIcons();
   bindGlobalEvents();
   try {
+    const meRes = await fetch('/api/auth/me', { headers: { accept: 'application/json' } });
+    if (meRes.status === 401) {
+      window.location.replace('/login');
+      return;
+    }
+    const me = await meRes.json().catch(() => ({}));
+    App.csrf = me.csrfToken || '';
     await refreshState(false);
     App.view = currentViewFromHash();
     if (App.view === 'nodes') await loadNodes();

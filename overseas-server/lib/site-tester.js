@@ -109,6 +109,13 @@ export class SiteTester {
     return jobSnapshot(this.job || this.lastJob);
   }
 
+  cancel() {
+    if (!this.job?.running) return false;
+    this.job.cancelRequested = true;
+    this.job.note = '正在取消…';
+    return true;
+  }
+
   enqueueAuto(nodes) {
     const settings = this.store.state.settings;
     if (settings.autoSite === false) return;
@@ -283,6 +290,7 @@ export class SiteTester {
       const timeoutMs = 9000;
       let index = 0;
       for (const [tag, node] of tagToNode) {
+        if (job.cancelRequested) break;
         index += 1;
         job.note = `正在检测 ${index}/${tagToNode.size}：${node.name}`;
         let nodeDispatcher = null;
@@ -336,6 +344,17 @@ export class SiteTester {
         job.done += 1;
         job.note = `已检测 ${job.done}/${tagToNode.size} 个节点`;
         if (job.done % 3 === 0) this.store.touch();
+      }
+      if (job.cancelRequested) {
+        job.phase = 'cancelled';
+        job.running = false;
+        job.finishedAt = new Date().toISOString();
+        job.note = `已取消（完成 ${job.done}/${tagToNode.size} 个节点）`;
+        this.lastJob = job;
+        this.job = null;
+        this.store.addEvent('warn', '站点检测已取消');
+        this.store.touch();
+        return;
       }
       job.phase = 'done';
       job.running = false;

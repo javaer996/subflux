@@ -52,6 +52,24 @@ export class ChinaTester {
     return snapshot(this.job || this.lastJob);
   }
 
+  cancel() {
+    if (!this.job?.running) return false;
+    this.job.cancelRequested = true;
+    this.job.note = '正在取消…';
+    return true;
+  }
+
+  finishCancelled(job) {
+    job.phase = 'cancelled';
+    job.running = false;
+    job.finishedAt = new Date().toISOString();
+    job.note = `已取消（完成 ${job.done}/${job.total}）`;
+    this.lastJob = job;
+    this.job = null;
+    this.store.addEvent('warn', `${job.label}已取消`);
+    this.store.touch();
+  }
+
   start(nodes, options = {}) {
     if (this.job?.running) return null;
     const list = nodes.filter(Boolean);
@@ -155,6 +173,7 @@ export class ChinaTester {
     if (job.skipped) job.note = `${job.skipped} 个 UDP 节点跳过 TCP 探针`;
     const batchSize = 50;
     for (let start = 0; start < targets.length; start += batchSize) {
+      if (job.cancelRequested) break;
       const batch = targets.slice(start, start + batchSize);
       const res = await fetch(probeEndpoint(base, 'tcp'), {
         method: 'POST',
@@ -192,6 +211,7 @@ export class ChinaTester {
       this.store.touch();
       if (start + batchSize < targets.length) await sleep(250);
     }
+    if (job.cancelRequested) return this.finishCancelled(job);
     job.phase = 'done';
     job.running = false;
     job.finishedAt = new Date().toISOString();
@@ -231,6 +251,7 @@ export class ChinaTester {
     if (!targets.length) throw new Error('没有可用的 Clash 代理配置；该节点无法进行实际连通检测');
     const batchSize = 20;
     for (let start = 0; start < targets.length; start += batchSize) {
+      if (job.cancelRequested) break;
       const batch = targets.slice(start, start + batchSize);
       const res = await fetch(probeEndpoint(base, 'proxy'), {
         method: 'POST',
@@ -274,6 +295,7 @@ export class ChinaTester {
       this.store.touch();
       if (start + batchSize < targets.length) await sleep(300);
     }
+    if (job.cancelRequested) return this.finishCancelled(job);
     job.phase = 'done';
     job.running = false;
     job.finishedAt = new Date().toISOString();

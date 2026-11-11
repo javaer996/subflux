@@ -15,6 +15,8 @@ import { normalizeSites } from './lib/sites.js';
 import { normalizeRouting, normalizeRuleList, parseCustomRules } from './lib/routing.js';
 import { CN_DIRECT_COUNT } from './lib/cn-direct.js';
 import { describeEngine } from './lib/engine.js';
+import { Auth } from './lib/auth.js';
+import { initLogger } from './lib/logger.js';
 import { refreshSource, isRefreshing, testFetchProxy, nextRunAt } from './lib/refresher.js';
 import { pushProfile } from './lib/pusher.js';
 import { buildOutput, normalizeFormat, profileSummary } from './lib/generator.js';
@@ -30,6 +32,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const STARTED_AT = new Date().toISOString();
 const STARTED_MS = Date.now();
 const BODY_LIMIT = 12 * 1024 * 1024;
+initLogger(DATA_DIR);
 
 async function assetsUpdatedAfterStart() {
   for (const name of ['index.html', 'app.js', 'styles.css']) {
@@ -42,6 +45,8 @@ async function assetsUpdatedAfterStart() {
 }
 
 const store = await new Store(DATA_DIR).init();
+const auth = await new Auth(DATA_DIR).init();
+if (auth.defaultCreds) console.warn('[auth] 正在使用默认账号 admin/subflux，请通过 SUBFLUX_USERNAME / SUBFLUX_PASSWORD 修改');
 const quality = new QualityService(store);
 const tester = new Tester(store, quality);
 const siteTester = new SiteTester(store);
@@ -88,6 +93,11 @@ function sendText(res, status, text, headers = {}) {
 
 function apiError(res, status, message, extra = {}) {
   sendJson(res, status, { ok: false, error: message, ...extra });
+}
+
+function clientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || req.socket?.remoteAddress || 'unknown';
 }
 
 async function readBody(req, limit = BODY_LIMIT) {
@@ -287,6 +297,42 @@ async function handleApi(req, res, url) {
     });
   }
 
+  if (pathname === '/api/auth/me' && method === 'GET') {
+    const session = auth.read(req);
+    if (!session) return apiError(res, 401, '未登录或会话已过期', { authenticated: false });
+    return sendJson(res, 200, {
+      ok: true,
+      authenticated: true,
+      username: session.u,
+      csrfToken: session.c,
+      defaultCreds: auth.defaultCreds,
+    });
+  }
+
+  if (pathname === '/api/auth/login' && method === 'POST') {
+    const ip = clientIp(req);
+    const wait = auth.blockedFor(ip);
+    if (wait > 0) {
+      res.setHeader('retry-after', String(wait));
+      return apiError(res, 429, `尝试次数过多，请 ${Math.max(1, Math.ceil(wait / 60))} 分钟后再试`);
+    }
+    const body = await readBody(req, 64 * 1024);
+    if (!auth.verify(body.username, body.pass)) {
+      auth.recordFail(ip);
+      return apiError(res, 401, '用户名或密码错误');
+    }
+    auth.clearFails(ip);
+    const session = auth.issue();
+    auth.setSession(res, req, session.token);
+    store.addEvent('info', `管理员 ${auth.username} 已登录`);
+    return sendJson(res, 200, { ok: true, username: auth.username, csrfToken: session.csrf });
+  }
+
+  if (pathname === '/api/auth/logout' && method === 'POST') {
+    auth.clearSession(res, req);
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (pathname === '/api/state' && method === 'GET') {
     const engine = describeEngine(store.state.settings.mihomoPath || '');
     const state = buildState(store, tester, siteTester, chinaTester, STARTED_AT, engine.available);
@@ -296,6 +342,7 @@ async function handleApi(req, res, url) {
     state.meta.chinaProbeConfigured = Boolean(store.state.settings.chinaProbeUrl);
     state.meta.chinaProbeReverseConfigured = Boolean(store.state.settings.chinaProbeReverseUrl);
     state.meta.directDomainCount = CN_DIRECT_COUNT;
+    state.meta.auth = { username: auth.username, defaultCreds: auth.defaultCreds };
     return sendJson(res, 200, state);
   }
 
@@ -596,6 +643,17 @@ async function handleApi(req, res, url) {
       ok: true,
       node: serializeNode(node, store.state.sources.find((s) => s.id === node.sourceId), store.state.settings),
     });
+  }
+
+  if (pathname === '/api/tasks/cancel' && method === 'POST') {
+    const body = await readBody(req, 64 * 1024);
+    const kind = String(body.kind || '').trim();
+    const map = { latency: tester, site: siteTester, china: chinaTester };
+    const target = map[kind];
+    if (!target) return apiError(res, 400, '未知的任务类型');
+    if (!target.cancel()) return apiError(res, 409, '任务没有在运行');
+    store.addEvent('warn', `已请求取消${kind === 'latency' ? '测速' : kind === 'site' ? '站点检测' : 'CN 检测'}任务`);
+    return sendJson(res, 200, { ok: true });
   }
 
   if (pathname === '/api/nodes/test' && method === 'POST') {
@@ -1052,6 +1110,17 @@ const server = http.createServer(async (req, res) => {
       return original.call(this, code, ...args);
     })(res.writeHead);
     if (url.pathname.startsWith('/api/')) {
+      const publicApi = url.pathname === '/api/health'
+        || url.pathname === '/api/auth/login'
+        || url.pathname === '/api/auth/me'
+        || url.pathname === '/api/auth/logout';
+      if (!publicApi) {
+        const session = auth.read(req);
+        if (!session) return apiError(res, 401, '未登录或会话已过期');
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method || 'GET') && !auth.csrfOk(req, session)) {
+          return apiError(res, 403, 'CSRF 校验失败，请刷新页面后重试');
+        }
+      }
       await handleApi(req, res, url);
       logRequest(req, status, started);
       return;
@@ -1059,6 +1128,19 @@ const server = http.createServer(async (req, res) => {
     const subMatch = url.pathname.match(/^\/sub\/([A-Za-z0-9_-]{8,64})(?:\/([A-Za-z0-9_-]+))?\/?$/);
     if (subMatch) {
       await serveSubscription(req, res, url, subMatch[1], subMatch[2]);
+      logRequest(req, status, started);
+      return;
+    }
+    if (url.pathname === '/login' || url.pathname === '/login.html') {
+      status = 200;
+      await serveStatic(req, res, new URL('/login.html', url));
+      logRequest(req, status, started);
+      return;
+    }
+    if ((url.pathname === '/' || url.pathname === '/index.html') && !auth.read(req)) {
+      status = 302;
+      res.writeHead(302, { location: '/login' });
+      res.end();
       logRequest(req, status, started);
       return;
     }
