@@ -2,6 +2,7 @@ import { aggregateSources, profileSummary } from './generator.js';
 import { GROUP_NAMES } from './constants.js';
 import { summarizeSites } from './sites.js';
 import { sourceBlockedReason, trafficInfo } from './traffic.js';
+import { certFilterPass } from './tls.js';
 import { formatBytes, IP_TYPE_LABELS, safeInt } from './util.js';
 
 export function serializeSource(source, settings) {
@@ -220,10 +221,7 @@ export function nodeQueryFilter(state, params = {}) {
     if (status === 'disabled' && !node.disabled) return false;
     if (status === 'untested' && node.qualityScore != null) return false;
     if (status === 'healthy' && node.alive !== true) return false;
-    const cert = String(params.cert || '');
-    if (cert === 'exclude' && node.certTrusted === false) return false;
-    if (cert === 'only' && node.certTrusted !== true) return false;
-    if (cert === 'untrusted' && node.certTrusted !== false) return false;
+    if (!certFilterPass(node, String(params.cert || ''))) return false;
     if (q) {
       const haystack = [
         node.name, node.server, node.isp, node.org, node.region, node.country,

@@ -5,6 +5,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { uid, sleep, errMessage } from './util.js';
 import { describeEngine } from './engine.js';
+import { nodeUsesTls } from './tls.js';
 
 /** 这些协议没有可探测的 TCP 入口，只能靠真正的代理握手来判断。 */
 export const UDP_PROTOCOLS = new Set(['hysteria', 'hysteria2', 'tuic', 'wireguard']);
@@ -108,7 +109,7 @@ export class ProxyProbe {
     usable.filter((node) => {
       const raw = node.raw || {};
       const type = String(raw.type || '').toLowerCase();
-      return (type === 'http' || type === 'https')
+      return (type === 'http' || type === 'https') && nodeUsesTls(node)
         && (raw['skip-cert-verify'] === true || raw['skip-cert-verify'] === 'true');
     }).forEach((node, index) => {
       const tag = `S${String(index + 1).padStart(3, '')}`;
@@ -231,7 +232,8 @@ export class ProxyProbe {
               const raw = node.raw || {};
               const type = String(raw.type || '').toLowerCase();
               const skipCert = raw['skip-cert-verify'] === true || raw['skip-cert-verify'] === 'true';
-              const certTrusted = (type === 'http' || type === 'https') && !skipCert ? true : undefined;
+              // 明文 HTTP 代理没有证书，不能算「证书可信」。
+              const certTrusted = (type === 'http' || type === 'https') && nodeUsesTls(node) && !skipCert ? true : undefined;
               results.set(node.id, { ok: true, latency: Math.round(value), error: '', ...(certTrusted === true ? { certTrusted: true } : {}) });
             } else {
               results.set(node.id, { ok: false, latency: null, error: '握手超时或失败' });

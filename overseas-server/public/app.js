@@ -1416,7 +1416,7 @@ function renderNodeFilters() {
           <span>证书</span>
           <select class="select" data-node-filter="cert">
             <option value="" ${!f.cert ? 'selected' : ''}>不限</option>
-            <option value="only" ${f.cert === 'only' ? 'selected' : ''}>证书可信</option>
+            <option value="only" ${f.cert === 'only' ? 'selected' : ''}>证书已通过校验</option>
             <option value="exclude" ${f.cert === 'exclude' ? 'selected' : ''}>排除证书不受信</option>
             <option value="untrusted" ${f.cert === 'untrusted' ? 'selected' : ''}>只看证书不受信</option>
           </select>
@@ -2102,9 +2102,9 @@ function openProfileModal(profile = null) {
           <select class="select" id="profile-cert" name="cert">
             <option value="" ${!f.cert ? 'selected' : ''}>不限</option>
             <option value="exclude" ${f.cert === 'exclude' ? 'selected' : ''}>排除证书不受信的节点</option>
-            <option value="only" ${f.cert === 'only' ? 'selected' : ''}>只保留证书可信的节点</option>
+            <option value="only" ${f.cert === 'only' ? 'selected' : ''}>只保留证书已通过校验的节点</option>
           </select>
-          <div class="field-hint">证书不受信的节点在 Clash / Mihomo 里能连，但小火箭等严格校验的客户端要手动「允许不安全」，移动端建议排除。</div>
+          <div class="field-hint">只作用于真的会校验证书的协议（HTTPS 代理 / Trojan / HY2 / TUIC / VLESS+TLS）；SS、SOCKS5、明文 HTTP、VLESS+Reality 没有证书可校验，两个选项都不会把它们筛掉。证书不受信的节点在 Clash / Mihomo 里能连，但小火箭等严格校验的客户端要手动「允许不安全」。</div>
         </div>
         <div class="field">
           <label>只保留握手可达节点</label>

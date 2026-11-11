@@ -1,6 +1,7 @@
 import YAML from 'yaml';
 import { buildUri, nodeFingerprint, protocolSupportedForSingbox } from './uri.js';
 import { sourceBlockedReason, trafficInfo } from './traffic.js';
+import { certFilterPass } from './tls.js';
 import {
   IP_TYPE_LABELS,
   cleanText,
@@ -124,8 +125,7 @@ function matchesFilter(node, profile, includeRe, excludeRe, warnings) {
   if (f.onlyAlive && node.alive !== true) return false;
   // 证书不受信的节点在 Mihomo / Clash 里能用，但小火箭等严格校验的客户端
   // 需要手动「允许不安全」，输出订阅可以整体排除或只保留证书可信的。
-  if (f.cert === 'exclude' && node.certTrusted === false) return false;
-  if (f.cert === 'only' && node.certTrusted !== true) return false;
+  if (!certFilterPass(node, f.cert)) return false;
   const haystack = [
     node.name, node.sourceName, node.server, node.isp, node.org, node.region, node.country,
     node.protocol, node.asn, node.ipType, node.ip,
