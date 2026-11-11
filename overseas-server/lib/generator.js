@@ -155,9 +155,26 @@ export function matchNodes(profile, state) {
   const beforeDedupe = filtered.length;
   const deduped = dedupeNodes(filtered);
   const sorted = sortNodes(deduped, profile.sort || 'quality');
+  const perRegion = safeInt(f.maxPerRegion, 0, 0, 500);
+  let capped = sorted;
+  if (perRegion > 0) {
+    const counter = new Map();
+    const kept = [];
+    for (const node of sorted) {
+      const key = node.countryCode || 'unknown';
+      const used = counter.get(key) || 0;
+      if (used >= perRegion) continue;
+      counter.set(key, used + 1);
+      kept.push(node);
+    }
+    if (kept.length < sorted.length) {
+      warnings.push(`每个国家/地区最多保留 ${perRegion} 个节点，已去掉 ${sorted.length - kept.length} 个`);
+    }
+    capped = kept;
+  }
   const max = safeInt(f.maxNodes, 500, 0, 20000);
-  const limited = max > 0 ? sorted.slice(0, max) : sorted;
-  if (max > 0 && sorted.length > max) warnings.push(`匹配 ${sorted.length} 个节点，按配置上限保留前 ${max} 个`);
+  const limited = max > 0 ? capped.slice(0, max) : capped;
+  if (max > 0 && capped.length > max) warnings.push(`匹配 ${capped.length} 个节点，按配置上限保留前 ${max} 个`);
   const nodes = nameNodes(
     limited,
     profile.renameTemplate || state.settings.renameTemplate,

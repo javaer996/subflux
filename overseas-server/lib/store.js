@@ -61,6 +61,7 @@ function defaultProfile() {
       include: '',
       exclude: '',
       maxNodes: 500,
+      maxPerRegion: 0,
       sites: [],
       china: '',
     },

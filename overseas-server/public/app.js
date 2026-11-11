@@ -1759,6 +1759,7 @@ function profileCard(profile) {
           <div class="source-badge-stack">
             ${profile.needsReview ? '<span class="badge badge-amber">需复核</span>' : profile.enabled ? '<span class="badge badge-mint">已启用</span>' : '<span class="badge badge-muted">已停用</span>'}
             <span class="badge badge-muted no-dot">${Number(profile.filters.maxNodes) > 0 ? `上限 ${profile.filters.maxNodes}` : '不限数量'}</span>
+            ${Number(profile.filters.maxPerRegion) > 0 ? `<span class="badge badge-muted no-dot">每国 ${profile.filters.maxPerRegion}</span>` : ''}
             ${profile.push?.enabled ? `<span class="badge badge-blue no-dot">推送 · ${pushIntervalLabel(profile.push.intervalMinutes)}</span>` : ''}
             ${profile.push?.enabled && profile.push?.lastStatus === 'error' ? '<span class="badge badge-red no-dot">推送失败</span>' : ''}
           </div>
@@ -1963,7 +1964,7 @@ function openProfileModal(profile = null) {
   const isEdit = Boolean(profile?.id);
   const f = profile?.filters || {
     protocols: [], regions: [], ipTypes: [], sourceIds: [], sites: [], china: '',
-    minQuality: 0, maxLatency: 0, onlyAlive: false, include: '', exclude: '', maxNodes: 500,
+    minQuality: 0, maxLatency: 0, onlyAlive: false, include: '', exclude: '', maxNodes: 500, maxPerRegion: 0,
   };
   const groups = profile?.groups || { auto: true, fallback: true, regions: true };
   const push = profile?.push || { enabled: false, intervalMinutes: 1440, targets: [] };
@@ -2074,6 +2075,11 @@ function openProfileModal(profile = null) {
           <label for="profile-max">最多输出节点</label>
           <input class="input" id="profile-max" name="maxNodes" type="number" min="0" max="20000" value="${Number.isFinite(Number(f.maxNodes)) ? Number(f.maxNodes) : 500}">
           <div class="field-hint">按排序保留前 N 个；填 0 表示不限制。也可以在订阅链接后加 ?limit=100 临时覆盖。</div>
+        </div>
+        <div class="field">
+          <label for="profile-max-region">每个国家/地区最多</label>
+          <input class="input" id="profile-max-region" name="maxPerRegion" type="number" min="0" max="500" value="${Number.isFinite(Number(f.maxPerRegion)) ? Number(f.maxPerRegion) : 0}">
+          <div class="field-hint">按国家/地区分别计数，超出部分丢弃；填 0 表示不限制。比如填 3，同一国家最多只输出 3 个。</div>
         </div>
         <div class="field">
           <label>只保留 TCP 可达节点</label>
@@ -2251,6 +2257,11 @@ function openProfileModal(profile = null) {
           const raw = String(fd.get('maxNodes') ?? '').trim();
           if (raw === '') return 0;
           return Math.max(0, Math.min(20000, Math.round(Number(raw) || 0)));
+        })(),
+        maxPerRegion: (() => {
+          const raw = String(fd.get('maxPerRegion') ?? '').trim();
+          if (raw === '') return 0;
+          return Math.max(0, Math.min(500, Math.round(Number(raw) || 0)));
         })(),
       },
       groups: {

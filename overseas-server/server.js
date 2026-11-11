@@ -150,6 +150,7 @@ function sanitizeFilters(input, state) {
     include: String(f.include || '').slice(0, 240),
     exclude: String(f.exclude || '').slice(0, 240),
     maxNodes: safeInt(f.maxNodes, 500, 0, 20000),
+    maxPerRegion: safeInt(f.maxPerRegion, 0, 0, 500),
   };
 }
 
