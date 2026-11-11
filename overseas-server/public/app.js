@@ -2685,7 +2685,7 @@ function renderSettings() {
                   <div><div class="field-label">刷新后自动站点检测</div><div class="field-hint">只检测还没有站点结果的新节点，不设数量上限</div></div>
                   <label class="switch"><input type="checkbox" name="autoSite" ${s.autoSite !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
-                <div class="field" style="grid-column:span 2">
+                <div class="field span-2">
                   <label for="setting-fetch-proxy">默认订阅拉取代理</label>
                   <div style="display:flex;gap:8px">
                     <input class="input" id="setting-fetch-proxy" name="fetchProxy" value="${esc(s.fetchProxy || '')}" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080">
@@ -2693,7 +2693,7 @@ function renderSettings() {
                   </div>
                   <div class="field-hint">支持 HTTP / HTTPS / SOCKS5；订阅源选择「外部代理地址」且地址留空时使用这里。也可以在订阅源里直接用节点池节点拉取。</div>
                 </div>
-                <div class="field-row card card-pad" style="padding:11px 13px;grid-column:span 2">
+                <div class="field-row card card-pad span-2" style="padding:11px 13px">
                   <div><div class="field-label">流量耗尽 / 过期时剔除节点</div><div class="field-hint">根据订阅响应的 Subscription-Userinfo 判断；关闭后即使耗尽也继续输出</div></div>
                   <label class="switch"><input type="checkbox" name="excludeDepleted" ${s.excludeDepleted !== false ? 'checked' : ''}><span class="track"></span></label>
                 </div>
@@ -2705,7 +2705,7 @@ function renderSettings() {
             <h2>定时测速</h2>
             <div class="desc">按固定间隔重新测所有节点的 TCP 入口延迟。只探测端口，不走代理；HY2 / TUIC 等 UDP 节点会跳过。</div>
             <div class="form-grid">
-              <div class="field-row card card-pad" style="padding:11px 13px;grid-column:span 2">
+              <div class="field-row card card-pad span-2" style="padding:11px 13px">
                 <div><div class="field-label">启用定时测速</div><div class="field-hint">到点时如果已有测速任务在跑，会等它结束后再开始；站点检测可以同时进行</div></div>
                 <label class="switch"><input type="checkbox" name="latencyAuto" ${s.latencyAuto !== false ? 'checked' : ''}><span class="track"></span></label>
               </div>
@@ -2749,7 +2749,7 @@ function renderSettings() {
             <h2>站点解锁检测</h2>
             <div class="desc">通过本地 Mihomo 引擎让节点真实访问网站，判断 YouTube、ChatGPT、Claude、Grok、Gemini 等站点是否可用；结果会写入节点名简写。</div>
             <div class="form-grid">
-              <div class="field" style="grid-column:span 2">
+              <div class="field span-2">
                 <div class="field-hint">不设数量上限：手动检测会测当前筛选（或勾选）的全部节点；自动检测只补还没有站点结果的节点。检测逐节点串行，所有站点并行访问，节点多时会跑得比较久。</div>
               </div>
               <div class="field">
