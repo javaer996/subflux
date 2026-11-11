@@ -15,6 +15,7 @@ const ICONS = {
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
+  duplicate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/><path d="M12.5 14.5h4M14.5 12.5v4"/></svg>',
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"/><circle cx="12" cy="12" r="2.6"/></svg>',
   external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 5 11 7-11 7V5Z"/></svg>',
@@ -1766,6 +1767,7 @@ function profileCard(profile) {
           <button class="icon-btn" data-action="show-qr" data-id="${esc(profile.id)}" title="二维码">${ico('qr')}</button>
           <button class="icon-btn" data-action="copy-profile-link" data-id="${esc(profile.id)}" title="复制订阅链接">${ico('copy')}</button>
           <button class="icon-btn" data-action="push-profile" data-id="${esc(profile.id)}" title="立即推送">${ico('upload')}</button>
+          <button class="icon-btn" data-action="copy-profile" data-id="${esc(profile.id)}" title="复制为新的输出订阅">${ico('duplicate')}</button>
           <button class="icon-btn" data-action="edit-profile" data-id="${esc(profile.id)}" title="编辑">${ico('edit')}</button>
           <button class="icon-btn is-danger" data-action="delete-profile" data-id="${esc(profile.id)}" title="删除">${ico('trash')}</button>
         </div>
@@ -1942,8 +1944,23 @@ function readPushTargets() {
   });
 }
 
+function copyProfile(profile) {
+  if (!profile) return;
+  const copy = {
+    ...profile,
+    id: undefined,
+    token: undefined,
+    name: `${profile.name} 副本`.slice(0, 40),
+    filters: { ...(profile.filters || {}) },
+    groups: { ...(profile.groups || {}) },
+    customRuleList: (profile.customRuleList || []).map((rule) => ({ ...rule })),
+    push: { ...(profile.push || {}), enabled: false, targets: (profile.push?.targets || []).map((target) => ({ ...target })) },
+  };
+  openProfileModal(copy);
+}
+
 function openProfileModal(profile = null) {
-  const isEdit = Boolean(profile);
+  const isEdit = Boolean(profile?.id);
   const f = profile?.filters || {
     protocols: [], regions: [], ipTypes: [], sourceIds: [], sites: [], china: '',
     minQuality: 0, maxLatency: 0, onlyAlive: false, include: '', exclude: '', maxNodes: 500,
@@ -3470,6 +3487,7 @@ function bindGlobalEvents() {
     if (action === 'delete-source') return deleteSource(id);
     if (action === 'preview-source') return openSourcePreview(id);
     if (action === 'add-profile') return openProfileModal();
+    if (action === 'copy-profile') return copyProfile(currentProfile(id));
     if (action === 'edit-profile') return openProfileModal(currentProfile(id));
     if (action === 'delete-profile') return deleteProfile(id);
     if (action === 'preview-profile') return openProfilePreview(id);
