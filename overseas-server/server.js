@@ -901,6 +901,8 @@ async function handleApi(req, res, url) {
     if (body.userAgent !== undefined) s.userAgent = String(body.userAgent || '').slice(0, 200) || s.userAgent;
     if (body.maxNodesPerSource !== undefined) s.maxNodesPerSource = safeInt(body.maxNodesPerSource, s.maxNodesPerSource, 100, 10000);
     if (body.qualityTTLHours !== undefined) s.qualityTTLHours = safeInt(body.qualityTTLHours, s.qualityTTLHours, 1, 720);
+    if (body.proxycheckKey !== undefined) s.proxycheckKey = String(body.proxycheckKey || '').trim().slice(0, 200);
+    if (body.proxycheckPerDay !== undefined) s.proxycheckPerDay = safeInt(body.proxycheckPerDay, s.proxycheckPerDay, 0, 2000);
     if (body.tcpTimeoutMs !== undefined) s.tcpTimeoutMs = safeInt(body.tcpTimeoutMs, s.tcpTimeoutMs, 500, 10000);
     if (body.requestTimeoutMs !== undefined) s.requestTimeoutMs = safeInt(body.requestTimeoutMs, s.requestTimeoutMs, 5000, 90000);
     if (body.chinaProbeUrl !== undefined) {

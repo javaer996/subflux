@@ -138,7 +138,7 @@ http://<host>:8888/sub/<token>/plain
 - **刷新后自动检测**：自动补 IP 画像、TCP 入口延迟和站点解锁；UDP 节点由站点检测补实际连通。
 - **拉取代理**：每个订阅源可选直连、走节点池中的某个节点（Mihomo 临时单节点出口），或指定 HTTP / HTTPS / SOCKS5 外部代理。
 - **流量识别**：读取 `Subscription-Userinfo`；流量耗尽或过期时可自动剔除。
-- **IP 画像**：入口 IP 的 ASN 类型（家宽 / 机房 / CDN / 移动 / 企业）+ 启发式质量分。
+- **IP 画像**：入口 IP 的 ASN 类型（家宽 / 机房 / CDN / 移动 / 企业）+ 代理 / VPN / 滥用风险（ProxyCheck）+ 延迟，综合成 1–99 质量分；与 iplark 等第三方口径不同，仅供参考。
 - **站点解锁**：通过 Mihomo 让节点真实访问站点，默认 YouTube / ChatGPT / Claude / Grok / Gemini，结果以 `YT·GPT·CL·GRK·GEM` 写入节点名。
 - **CN 连通检测**：由 `china-probe/` 从中国大陆发起 TCP 或实际代理检测（含 HY2 / TUIC / WireGuard）。
 - **分流规则**：私网直连、159 条国内常见域名显式直连、AI / 流媒体代理、`GEOSITE/GEOIP CN` 兜底，支持可视化自定义规则。

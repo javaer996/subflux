@@ -62,6 +62,8 @@ export function serializeNode(node, source, settings) {
     qualityScore: Number.isFinite(node.qualityScore) ? node.qualityScore : null,
     qualityLabel: node.qualityLabel || '待测',
     qualityNote: node.qualityNote || '',
+    qualityRisk: Number.isFinite(node.qualityRisk) ? node.qualityRisk : null,
+    qualitySignal: node.qualitySignal || '',
     latency: Number.isFinite(node.latency) ? node.latency : null,
     alive: node.alive ?? null,
     testedAt: node.testedAt || null,

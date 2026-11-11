@@ -2,6 +2,8 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { sleep, clamp, cleanText, flagEmoji, regionName, qualityLabel } from './util.js';
 
+const PROXYCHECK_URL_BUDGET = 180;
+
 const IP_API_FIELDS = 'status,message,country,countryCode,regionName,city,isp,org,as,asname,mobile,proxy,hosting,query';
 const DC_WORDS = [
   'amazon', 'aws', 'google', 'microsoft', 'azure', 'oracle', 'digitalocean', 'vultr', 'linode',
@@ -171,30 +173,121 @@ export class QualityService {
     return result;
   }
 
+  proxycheckDaily() {
+    const today = new Date().toISOString().slice(0, 10);
+    let api = this.store.state.qualityApi;
+    if (!api || api.date !== today) {
+      api = { date: today, count: 0 };
+      this.store.state.qualityApi = api;
+    }
+    return api;
+  }
+
+  async lookupProxycheck(ips, onProgress) {
+    const list = [...new Set(ips)].filter((ip) => net.isIP(ip) === 4);
+    if (!list.length) return 0;
+    const ttl = Number(this.store.state.settings.qualityTTLHours || 168) * 3600 * 1000;
+    const missing = list.filter((ip) => {
+      const entry = this.store.state.qualityCache[ip];
+      return !entry?.pcAt || Date.now() - entry.pcAt > ttl;
+    });
+    if (!missing.length) return 0;
+    const api = this.proxycheckDaily();
+    const key = cleanText(this.store.state.settings.proxycheckKey || process.env.PROXYCHECK_KEY || '', 120);
+    const dailyLimit = Number(this.store.state.settings.proxycheckPerDay ?? 90);
+    if (!Number.isFinite(dailyLimit) || dailyLimit <= 0) return 0;
+    const batches = [];
+    let current = [];
+    let length = 0;
+    for (const ip of missing) {
+      if (current.length && length + ip.length + 1 > PROXYCHECK_URL_BUDGET) {
+        batches.push(current);
+        current = [];
+        length = 0;
+      }
+      current.push(ip);
+      length += ip.length + 1;
+    }
+    if (current.length) batches.push(current);
+    let done = 0;
+    let processed = 0;
+    for (let b = 0; b < batches.length; b += 1) {
+      const batch = batches[b];
+      if (api.count + batch.length > dailyLimit) {
+        console.warn(`[quality] proxycheck 今日额度已用完（${api.count}/${dailyLimit}），剩余 IP 下次补全`);
+        break;
+      }
+      const url = `https://proxycheck.io/v2/${batch.join(',')}?vpn=1&risk=1${key ? `&key=${encodeURIComponent(key)}` : ''}`;
+      try {
+        const res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+        api.count += batch.length;
+        this.store.touch();
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.status !== 'ok') throw new Error(data.message || data.status || '返回异常');
+        for (const ip of batch) {
+          const entry = this.store.state.qualityCache[ip];
+          if (!entry) continue;
+          const row = data[ip];
+          entry.pc = row ? {
+            proxy: row.proxy === 'yes',
+            type: cleanText(row.type, 24),
+            risk: Number.isFinite(Number(row.risk)) ? Math.round(Number(row.risk)) : null,
+            provider: cleanText(row.provider, 80),
+          } : null;
+          entry.pcAt = Date.now();
+          done += 1;
+        }
+      } catch (err) {
+        console.warn('[quality] proxycheck 查询失败:', err.message);
+        break;
+      }
+      processed += batch.length;
+      onProgress?.(Math.min(missing.length, processed), missing.length);
+      if (b + 1 < batches.length) await sleep(1200);
+    }
+    return done;
+  }
+
   classify(node, entry) {
     const orgText = `${entry.isp || ''} ${entry.org || ''} ${entry.asname || ''} ${entry.as || ''}`.toLowerCase();
     const isCdn = includesAny(orgText, CDN_WORDS);
+    const pc = entry.pc || null;
+    const pcType = String(pc?.type || '').toLowerCase();
+    const pcProxy = pc?.proxy === true || ['vpn', 'tor', 'socks', 'socks5', 'https', 'http', 'proxy', 'compromised server'].includes(pcType);
+    const risk = Number.isFinite(pc?.risk) ? pc.risk : null;
     let ipType = 'unknown';
     if (entry.status !== 'success') ipType = 'unknown';
     else if (isCdn) ipType = 'cdn';
     else if (entry.mobile) ipType = 'mobile';
-    else if (entry.hosting) ipType = 'dc';
+    else if (entry.hosting || pcType === 'vpn' || pcType === 'tor') ipType = 'dc';
     else if (includesAny(orgText, DC_WORDS)) ipType = 'dc';
+    else if (pcType === 'residential') ipType = 'home';
     else if (includesAny(orgText, HOME_WORDS)) ipType = 'home';
     else if (orgText.trim()) ipType = 'business';
-
-    const base = { home: 86, mobile: 77, business: 63, cdn: 56, dc: 40, unknown: 50 }[ipType];
+    const base = { home: 80, mobile: 72, business: 64, cdn: 52, dc: 58, unknown: 45 }[ipType];
     let score = base;
-    if (entry.proxy) score -= 24;
-    if (/vpn|proxy|tor exit|tor-exit/.test(orgText)) score -= 10;
-    if (ipType === 'cdn') score -= 3;
-    if (node.latency != null) {
-      if (node.latency <= 60) score += 12;
-      else if (node.latency <= 100) score += 8;
-      else if (node.latency <= 180) score += 4;
-      else if (node.latency <= 300) score -= 2;
-      else if (node.latency <= 500) score -= 7;
-      else score -= 14;
+    if (pcType === 'tor') {
+      score = 6;
+    } else {
+      if (pcType === 'vpn') score -= 12;
+      else if (pcProxy) score -= 10;
+      if (entry.proxy) score -= 6;
+      if (risk != null) {
+        if (risk >= 75) score -= 12;
+        else if (risk >= 50) score -= 8;
+        else if (risk >= 25) score -= 4;
+      }
+      if (entry.hosting && ipType !== 'mobile') score -= 3;
+      if (node.latency != null) {
+        if (node.latency <= 60) score += 5;
+        else if (node.latency <= 120) score += 2;
+        else if (node.latency > 400) score -= 6;
+        else if (node.latency > 250) score -= 3;
+      }
+      if (!pc) score = Math.min(score, 60);
+      if (pcProxy || entry.proxy) score = Math.min(score, 50);
+      if (ipType === 'dc' || ipType === 'cdn') score = Math.min(score, 72);
     }
     const cc = cleanText(entry.countryCode, 2).toUpperCase();
     return {
@@ -211,10 +304,15 @@ export class QualityService {
       ipType,
       qualityScore: clamp(Math.round(score), 1, 99),
       qualityLabel: qualityLabel(clamp(Math.round(score), 1, 99)),
+      qualityRisk: risk,
+      qualitySignal: pc ? `${pcType || '未知'}${pcProxy ? ' · 代理' : ''}` : '未查风险',
       risk: {
         proxy: Boolean(entry.proxy),
         hosting: Boolean(entry.hosting),
         mobile: Boolean(entry.mobile),
+        vpn: pcType === 'vpn',
+        tor: pcType === 'tor',
+        risk,
       },
       qualityAt: new Date().toISOString(),
     };
@@ -240,6 +338,7 @@ export class QualityService {
     }
     const uniqueIps = [...new Set([...hostToIp.values()])];
     const rows = await this.lookupIps(uniqueIps, options.onProgress);
+    await this.lookupProxycheck([...rows.keys()], options.onProgress);
     let updated = 0;
     for (const node of list) {
       const ip = hostToIp.get(node.id);

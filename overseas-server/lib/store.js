@@ -15,6 +15,8 @@ export const DEFAULT_SETTINGS = {
   userAgent: 'clash.meta/1.19.8',
   maxNodesPerSource: 3000,
   qualityTTLHours: 168,
+  proxycheckKey: '',
+  proxycheckPerDay: 90,
   tcpTimeoutMs: 2500,
   requestTimeoutMs: 25000,
   autoRefresh: true,
@@ -167,6 +169,9 @@ export class Store extends EventEmitter {
     state.settings.routing.customRules = '';
     state.settings.sites = normalizeSites(data.settings?.sites);
     state.settings.mihomoPath = cleanText(data.settings?.mihomoPath, 500);
+    state.settings.proxycheckKey = cleanText(data.settings?.proxycheckKey, 200);
+    const pcPerDay = Number.parseInt(data.settings?.proxycheckPerDay, 10);
+    state.settings.proxycheckPerDay = Number.isFinite(pcPerDay) ? clamp(pcPerDay, 0, 2000) : DEFAULT_SETTINGS.proxycheckPerDay;
   state.settings.subBaseUrl = cleanText(data.settings?.subBaseUrl, 500).replace(/\/+$/, '');
     // Repair profile filter/group shapes from older snapshots.
     state.profiles = state.profiles.map((p) => {

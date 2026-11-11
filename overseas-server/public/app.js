@@ -1488,7 +1488,7 @@ function nodeRow(node) {
           <span class="quality-chip ${qc}"><span class="dot"></span>${q == null ? '—' : q}</span>
           <span class="quality-bar" style="color:${q == null ? 'var(--muted-2)' : q >= 82 ? 'var(--mint)' : q >= 68 ? '#9fe875' : q >= 52 ? 'var(--amber)' : 'var(--red)'}"><i style="width:${q == null ? 0 : q}%"></i></span>
         </div>
-        <div class="tiny dim" style="margin-top:2px">${esc(node.qualityLabel || '待测')}</div>
+        <div class="tiny dim" style="margin-top:2px" title="${esc(node.qualitySignal || '')}">${esc(node.qualityLabel || '待测')}${node.qualityRisk != null && node.qualityRisk >= 25 ? ` · 风险 ${node.qualityRisk}` : ''}</div>
       </td>
       <td><span class="latency ${lat}" title="${esc(node.testNote || '')}">${fmtLatency(node.latency)}</span>${node.testNote ? `<div class="tiny dim" title="${esc(node.testNote)}">${esc(node.testNote.includes('UDP') ? 'UDP · 见站点检测' : '')}</div>` : ''}</td>
       <td><div style="display:flex;flex-wrap:wrap;gap:4px">${stateHtml}${cnBadge(node)}</div></td>
@@ -2669,6 +2669,16 @@ function renderSettings() {
                   <input class="input" id="setting-ttl" name="qualityTTLHours" type="number" min="1" max="720" value="${s.qualityTTLHours}">
                 </div>
                 <div class="field">
+                  <label for="setting-proxycheck-key">ProxyCheck API Key（可选）</label>
+                  <input class="input" id="setting-proxycheck-key" name="proxycheckKey" type="password" value="${esc(s.proxycheckKey || '')}" placeholder="留空则使用免费额度" autocomplete="off">
+                  <div class="field-hint">用于补充代理 / VPN / 滥用风险数据。免费无 Key 每天 100 个 IP，注册免费 Key 后 1,000 个/天。</div>
+                </div>
+                <div class="field">
+                  <label for="setting-proxycheck-limit">每日风险检测 IP 数</label>
+                  <input class="input" id="setting-proxycheck-limit" name="proxycheckPerDay" type="number" min="0" max="2000" value="${s.proxycheckPerDay ?? 90}">
+                  <div class="field-hint">0 = 关闭；超出额度的 IP 会留到下次检测，不会报错。</div>
+                </div>
+                <div class="field">
                   <label for="setting-request-timeout">订阅请求超时（毫秒）</label>
                   <input class="input" id="setting-request-timeout" name="requestTimeoutMs" type="number" min="5000" max="90000" step="1000" value="${s.requestTimeoutMs}">
                 </div>
@@ -2989,6 +2999,8 @@ function bindSettings() {
       testUrl: String(fd.get('testUrl') || ''),
       defaultInterval: Number(fd.get('defaultInterval')) || 360,
       qualityTTLHours: Number(fd.get('qualityTTLHours')) || 168,
+      proxycheckKey: String(fd.get('proxycheckKey') || '').trim(),
+      proxycheckPerDay: Number(fd.get('proxycheckPerDay')) || 0,
       requestTimeoutMs: Number(fd.get('requestTimeoutMs')) || 25000,
       tcpTimeoutMs: Number(fd.get('tcpTimeoutMs')) || 2500,
       maxNodesPerSource: Number(fd.get('maxNodesPerSource')) || 3000,

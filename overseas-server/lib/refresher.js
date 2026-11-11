@@ -9,7 +9,7 @@ const inflight = new Set();
 const MAX_BODY = 15 * 1024 * 1024;
 const QUALITY_FIELDS = [
   'ip', 'countryCode', 'country', 'region', 'flag', 'city', 'isp', 'org', 'asn', 'asname',
-  'ipType', 'qualityScore', 'qualityLabel', 'qualityNote', 'risk', 'qualityAt',
+  'ipType', 'qualityScore', 'qualityLabel', 'qualityNote', 'qualityRisk', 'qualitySignal', 'risk', 'qualityAt',
 ];
 
 // 刷新只更新节点本身的信息，这些检测结果要按节点指纹保留下来，

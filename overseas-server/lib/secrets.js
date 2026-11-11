@@ -90,7 +90,7 @@ export function decryptValue(value) {
   }
 }
 
-const SETTINGS_SECRETS = ['chinaProbeToken', 'fetchProxy'];
+const SETTINGS_SECRETS = ['chinaProbeToken', 'fetchProxy', 'proxycheckKey'];
 const SOURCE_SECRETS = ['url', 'content', 'proxyUrl'];
 const NODE_SECRETS = ['raw', 'uri'];
 const TARGET_SECRETS = ['url', 'accessKeyId', 'accessKeySecret', 'headers'];
