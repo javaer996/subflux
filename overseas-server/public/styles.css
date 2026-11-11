@@ -141,7 +141,6 @@ button { color: inherit; }
 .status-dot.is-loading { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,196,107,.08); animation: pulse 1.2s infinite; }
 .status-dot.is-error { background: var(--red); box-shadow: 0 0 0 4px rgba(255,113,130,.08); }
 .sidebar-meta { margin-top: 12px; display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
-.sidebar-tip { margin-top: 10px; font-size: 10.5px; color: var(--muted-2); opacity: .75; }
 .sidebar-logout { display:flex; align-items:center; gap:8px; margin-top:12px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:12px; cursor:pointer; width:100%; }
 .sidebar-logout:hover { color:var(--text); border-color:var(--line-strong); background:var(--surface-2); }
 .sidebar-logout svg { width:14px; height:14px; }

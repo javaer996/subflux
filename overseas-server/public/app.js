@@ -2863,7 +2863,6 @@ function renderSettings() {
               <div class="info-row"><span>运行时长</span><b>${esc(uptime(meta.uptimeSec))}</b></div>
               <div class="info-row"><span>内存占用</span><b>${meta.memoryMB} MB RSS</b></div>
               <div class="info-row"><span>Node.js</span><b>${esc(meta.nodeVersion)}</b></div>
-              <div class="info-row"><span>监听地址</span><b>0.0.0.0:8888</b></div>
               <div class="info-row"><span>订阅 / 节点 / 输出</span><b>${App.state.stats.sources.total} / ${fmtNum(App.state.stats.nodes.total)} / ${App.state.profiles.length}</b></div>
             </div>
           </div>
@@ -2888,7 +2887,7 @@ function renderSettings() {
           </div>
           <div class="card settings-section danger-zone">
             <h2>安全提示</h2>
-            <div class="desc">服务绑定 <span class="code-inline">0.0.0.0</span>，同一网络内可访问且没有登录验证。不要把 8888 端口直接映射到公网；如需远程访问，请使用反向代理 + 访问控制。</div>
+            <div class="desc">面板已启用登录认证，订阅链接 <span class="code-inline">/sub/&lt;token&gt;</span> 仍使用令牌。不要把服务端口直接暴露到公网；如需远程访问，建议用反向代理加上 HTTPS 与访问控制。</div>
           </div>
         </div>
       </div>

@@ -20,7 +20,6 @@
   button:disabled { opacity:.6; cursor:default; }
   .error { display:none; margin-top:14px; padding:9px 12px; border-radius:9px; background:rgba(255,107,107,.12); border:1px solid rgba(255,107,107,.35); color:#ffb4b4; font-size:12px; }
   .error.show { display:block; }
-  .foot { margin-top:18px; color:var(--muted); font-size:11px; text-align:center; }
 </style>
 </head>
 <body>
@@ -38,7 +37,6 @@
     <input id="pass" name="pass" type="password" autocomplete="current-password" required />
     <button id="submit" type="submit">登录</button>
     <div class="error" id="error"></div>
-    <div class="foot">账号由容器环境变量 SUBFLUX_USERNAME / SUBFLUX_PASSWORD 配置</div>
   </form>
 <script>
   const form = document.getElementById('login-form');
