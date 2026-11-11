@@ -61,6 +61,7 @@ function defaultProfile() {
       minQuality: 0,
       maxLatency: 0,
       onlyAlive: false,
+      cert: '',
       include: '',
       exclude: '',
       maxNodes: 500,

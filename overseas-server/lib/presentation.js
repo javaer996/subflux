@@ -220,6 +220,10 @@ export function nodeQueryFilter(state, params = {}) {
     if (status === 'disabled' && !node.disabled) return false;
     if (status === 'untested' && node.qualityScore != null) return false;
     if (status === 'healthy' && node.alive !== true) return false;
+    const cert = String(params.cert || '');
+    if (cert === 'exclude' && node.certTrusted === false) return false;
+    if (cert === 'only' && node.certTrusted !== true) return false;
+    if (cert === 'untrusted' && node.certTrusted !== false) return false;
     if (q) {
       const haystack = [
         node.name, node.server, node.isp, node.org, node.region, node.country,

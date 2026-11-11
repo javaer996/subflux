@@ -149,6 +149,7 @@ function sanitizeFilters(input, state) {
     minQuality: safeInt(f.minQuality, 0, 0, 100),
     maxLatency: safeInt(f.maxLatency, 0, 0, 600000),
     onlyAlive: Boolean(f.onlyAlive),
+    cert: f.cert === 'exclude' || f.cert === 'only' ? f.cert : '',
     include: String(f.include || '').slice(0, 240),
     exclude: String(f.exclude || '').slice(0, 240),
     maxNodes: safeInt(f.maxNodes, 500, 0, 20000),

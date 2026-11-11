@@ -84,7 +84,7 @@ const App = {
   nodeLoadSeq: 0,
   nodeFilters: {
     q: '', protocol: '', region: '', ipType: '', sourceId: '', site: '', china: '', status: 'usable',
-    qualityMin: '', latencyMax: '', alive: '', sort: 'quality',
+    qualityMin: '', latencyMax: '', alive: '', cert: '', sort: 'quality',
   },
   nodePage: 1,
   nodePageSize: 50,
@@ -1413,6 +1413,15 @@ function renderNodeFilters() {
           </select>
         </div>
         <div class="filter-field">
+          <span>证书</span>
+          <select class="select" data-node-filter="cert">
+            <option value="" ${!f.cert ? 'selected' : ''}>不限</option>
+            <option value="only" ${f.cert === 'only' ? 'selected' : ''}>证书可信</option>
+            <option value="exclude" ${f.cert === 'exclude' ? 'selected' : ''}>排除证书不受信</option>
+            <option value="untrusted" ${f.cert === 'untrusted' ? 'selected' : ''}>只看证书不受信</option>
+          </select>
+        </div>
+        <div class="filter-field">
           <span>排序</span>
           <select class="select" data-node-filter="sort">
             <option value="quality" ${f.sort === 'quality' ? 'selected' : ''}>质量优先</option>
@@ -1543,7 +1552,7 @@ async function loadNodes() {
       sort: f.sort || 'quality',
       status: f.status || 'usable',
     });
-    for (const key of ['q', 'protocol', 'region', 'ipType', 'sourceId', 'site', 'china', 'qualityMin', 'latencyMax', 'alive']) {
+    for (const key of ['q', 'protocol', 'region', 'ipType', 'sourceId', 'site', 'china', 'qualityMin', 'latencyMax', 'alive', 'cert']) {
       if (f[key]) params.set(key, f[key]);
     }
     const data = await api(`/api/nodes?${params.toString()}`);
@@ -1579,7 +1588,7 @@ async function goNodePage(target) {
 function nodeFilterPayload() {
   const f = App.nodeFilters;
   const out = { status: f.status || 'usable', sort: f.sort || 'quality' };
-  for (const key of ['q', 'protocol', 'region', 'ipType', 'sourceId', 'site', 'china', 'qualityMin', 'latencyMax', 'alive']) {
+  for (const key of ['q', 'protocol', 'region', 'ipType', 'sourceId', 'site', 'china', 'qualityMin', 'latencyMax', 'alive', 'cert']) {
     if (f[key]) out[key] = f[key];
   }
   return out;
@@ -1764,6 +1773,7 @@ function profileCard(profile) {
             ${profile.needsReview ? '<span class="badge badge-amber">需复核</span>' : profile.enabled ? '<span class="badge badge-mint">已启用</span>' : '<span class="badge badge-muted">已停用</span>'}
             <span class="badge badge-muted no-dot">${Number(profile.filters.maxNodes) > 0 ? `上限 ${profile.filters.maxNodes}` : '不限数量'}</span>
             ${Number(profile.filters.maxPerRegion) > 0 ? `<span class="badge badge-muted no-dot">每国 ${profile.filters.maxPerRegion}</span>` : ''}
+            ${profile.filters.cert === 'exclude' ? '<span class="badge badge-muted no-dot">排除不受信</span>' : profile.filters.cert === 'only' ? '<span class="badge badge-muted no-dot">仅受信证书</span>' : ''}
             ${profile.push?.enabled ? `<span class="badge badge-blue no-dot">推送 · ${pushIntervalLabel(profile.push.intervalMinutes)}</span>` : ''}
             ${profile.push?.enabled && profile.push?.lastStatus === 'error' ? '<span class="badge badge-red no-dot">推送失败</span>' : ''}
           </div>
@@ -1826,6 +1836,8 @@ function profileFilterTags(profile) {
   if (Number(f.minQuality) > 0) tags.push(`质量 <em>≥ ${f.minQuality}</em>`);
   if (Number(f.maxLatency) > 0) tags.push(`延迟 <em>≤ ${f.maxLatency} ms</em>`);
   if (f.onlyAlive) tags.push('<em>仅握手可达</em>');
+  if (f.cert === 'exclude') tags.push('排除证书不受信');
+  if (f.cert === 'only') tags.push('<em>仅证书可信</em>');
   if (f.sourceIds?.length) tags.push(`来源 <em>${f.sourceIds.length} 个</em>`);
   if (f.sites?.length) {
     const siteMap = new Map((App.state.settings.sites || []).map((s) => [s.id, s.short]));
@@ -1968,7 +1980,7 @@ function openProfileModal(profile = null) {
   const isEdit = Boolean(profile?.id);
   const f = profile?.filters || {
     protocols: [], regions: [], ipTypes: [], sourceIds: [], sites: [], china: '',
-    minQuality: 0, maxLatency: 0, onlyAlive: false, include: '', exclude: '', maxNodes: 500, maxPerRegion: 0,
+    minQuality: 0, maxLatency: 0, onlyAlive: false, cert: '', include: '', exclude: '', maxNodes: 500, maxPerRegion: 0,
   };
   const groups = profile?.groups || { auto: true, fallback: true, regions: true };
   const push = profile?.push || { enabled: false, intervalMinutes: 1440, targets: [] };
@@ -2084,6 +2096,15 @@ function openProfileModal(profile = null) {
           <label for="profile-max-region">每个国家/地区最多</label>
           <input class="input" id="profile-max-region" name="maxPerRegion" type="number" min="0" max="500" value="${Number.isFinite(Number(f.maxPerRegion)) ? Number(f.maxPerRegion) : 0}">
           <div class="field-hint">按国家/地区分别计数，超出部分丢弃；填 0 表示不限制。比如填 3，同一国家最多只输出 3 个。</div>
+        </div>
+        <div class="field">
+          <label for="profile-cert">证书校验</label>
+          <select class="select" id="profile-cert" name="cert">
+            <option value="" ${!f.cert ? 'selected' : ''}>不限</option>
+            <option value="exclude" ${f.cert === 'exclude' ? 'selected' : ''}>排除证书不受信的节点</option>
+            <option value="only" ${f.cert === 'only' ? 'selected' : ''}>只保留证书可信的节点</option>
+          </select>
+          <div class="field-hint">证书不受信的节点在 Clash / Mihomo 里能连，但小火箭等严格校验的客户端要手动「允许不安全」，移动端建议排除。</div>
         </div>
         <div class="field">
           <label>只保留握手可达节点</label>
@@ -2255,6 +2276,7 @@ function openProfileModal(profile = null) {
         minQuality: Number(fd.get('minQuality')) || 0,
         maxLatency: Number(fd.get('maxLatency')) || 0,
         onlyAlive: fd.get('onlyAlive') === 'on',
+        cert: String(fd.get('cert') || ''),
         include: String(fd.get('include') || ''),
         exclude: String(fd.get('exclude') || ''),
         maxNodes: (() => {
@@ -3442,7 +3464,7 @@ async function refreshAllSources() {
 function resetNodeFilters() {
   App.nodeFilters = {
     q: '', protocol: '', region: '', ipType: '', sourceId: '', site: '', china: '', status: 'usable',
-    qualityMin: '', latencyMax: '', alive: '', sort: 'quality',
+    qualityMin: '', latencyMax: '', alive: '', cert: '', sort: 'quality',
   };
   App.nodePage = 1;
   App.selected.clear();
