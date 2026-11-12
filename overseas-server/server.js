@@ -13,6 +13,7 @@ import { SiteTester } from './lib/site-tester.js';
 import { ChinaTester } from './lib/china-tester.js';
 import { detectClientFormat } from './lib/clients.js';
 import { normalizeSites } from './lib/sites.js';
+import { normalizeClock, normalizeTimezone, inQuietHours, afterQuietHours } from './lib/quiet-hours.js';
 import { normalizeRouting, normalizeRuleList, parseCustomRules } from './lib/routing.js';
 import { CN_DIRECT_COUNT } from './lib/cn-direct.js';
 import { describeEngine } from './lib/engine.js';
@@ -903,6 +904,36 @@ async function handleApi(req, res, url) {
       if (next !== s.latencyIntervalMinutes) latencyChanged = true;
       s.latencyIntervalMinutes = next;
     }
+    // 夜间模式：先全部校验，通过后再落值，避免中途 400 把设置改脏。
+    let quietChanged = false;
+    let quietEnabledNext = s.quietHoursEnabled === true;
+    if (body.quietHoursEnabled !== undefined) {
+      const next = Boolean(body.quietHoursEnabled);
+      if (next !== quietEnabledNext) { quietEnabledNext = next; quietChanged = true; }
+    }
+    let quietStartNext = s.quietHoursStart;
+    if (body.quietHoursStart !== undefined) {
+      const next = normalizeClock(body.quietHoursStart);
+      if (!next) return apiError(res, 400, '夜间模式开始时间格式应为 HH:MM，例如 23:00');
+      if (next !== quietStartNext) { quietStartNext = next; quietChanged = true; }
+    }
+    let quietEndNext = s.quietHoursEnd;
+    if (body.quietHoursEnd !== undefined) {
+      const next = normalizeClock(body.quietHoursEnd);
+      if (!next) return apiError(res, 400, '夜间模式结束时间格式应为 HH:MM，例如 07:00');
+      if (next !== quietEndNext) { quietEndNext = next; quietChanged = true; }
+    }
+    let quietTzNext = s.quietHoursTz || '';
+    if (body.quietHoursTz !== undefined) {
+      const next = normalizeTimezone(body.quietHoursTz);
+      if (next === null) return apiError(res, 400, '时区名称无法识别，例如 Asia/Shanghai 或 UTC');
+      if (next !== quietTzNext) { quietTzNext = next; quietChanged = true; }
+    }
+    if (quietStartNext === quietEndNext) return apiError(res, 400, '夜间模式的开始与结束时间不能相同');
+    s.quietHoursStart = quietStartNext;
+    s.quietHoursEnd = quietEndNext;
+    s.quietHoursTz = quietTzNext;
+    s.quietHoursEnabled = quietEnabledNext;
     if (body.connectConcurrency !== undefined) s.connectConcurrency = safeInt(body.connectConcurrency, s.connectConcurrency, 1, 80);
     if (body.connectTimeoutMs !== undefined) s.connectTimeoutMs = safeInt(body.connectTimeoutMs, s.connectTimeoutMs, 1000, 20000);
     if (body.tcpConcurrency !== undefined) s.tcpConcurrency = safeInt(body.tcpConcurrency, s.tcpConcurrency, 1, 64);
@@ -969,6 +1000,10 @@ async function handleApi(req, res, url) {
       s.latencyNextAt = null;
     } else if (latencyChanged || !s.latencyNextAt) {
       s.latencyNextAt = new Date(Date.now() + Math.max(5, Number(s.latencyIntervalMinutes) || 60) * 60_000).toISOString();
+    }
+    // 若此刻正处于夜间模式（或刚把夜间区间改到现在），把测速顺延到夜间结束之后。
+    if (s.latencyAuto !== false && quietChanged && inQuietHours(s)) {
+      s.latencyNextAt = new Date(afterQuietHours(s)).toISOString();
     }
     store.addEvent('info', '系统设置已更新');
     await store.flush();

@@ -5,6 +5,7 @@ import { uid, clamp, cleanText } from './util.js';
 import { DEFAULT_SITES, normalizeSites } from './sites.js';
 import { DEFAULT_ROUTING, normalizeRouting, normalizeRuleList, parseCustomRules } from './routing.js';
 import { initSecrets, encryptState, decryptState, hasPlaintextSecrets } from './secrets.js';
+import { normalizeClock, normalizeTimezone } from './quiet-hours.js';
 
 export const DEFAULT_SETTINGS = {
   testUrl: 'https://www.gstatic.com/generate_204',
@@ -29,6 +30,10 @@ export const DEFAULT_SETTINGS = {
   latencyIntervalMinutes: 60,
   latencyLastAt: null,
   latencyNextAt: null,
+  quietHoursEnabled: false,
+  quietHoursStart: '23:00',
+  quietHoursEnd: '07:00',
+  quietHoursTz: '',
   tcpConcurrency: 16,
   fetchProxy: '',
   chinaProbeUrl: '',
@@ -185,7 +190,12 @@ export class Store extends EventEmitter {
     state.settings.connectTimeoutMs = Number.isFinite(connTimeout) ? clamp(connTimeout, 1000, 20000) : DEFAULT_SETTINGS.connectTimeoutMs;
     const connConc = Number.parseInt(data.settings?.connectConcurrency, 10);
     state.settings.connectConcurrency = Number.isFinite(connConc) ? clamp(connConc, 1, 80) : DEFAULT_SETTINGS.connectConcurrency;
-  state.settings.subBaseUrl = cleanText(data.settings?.subBaseUrl, 500).replace(/\/+$/, '');
+    state.settings.subBaseUrl = cleanText(data.settings?.subBaseUrl, 500).replace(/\/+$/, '');
+    // 夜间模式：仅接受合法的 HH:MM，缺失时回落到默认区间。
+    state.settings.quietHoursEnabled = data.settings?.quietHoursEnabled === true;
+    state.settings.quietHoursStart = normalizeClock(data.settings?.quietHoursStart, DEFAULT_SETTINGS.quietHoursStart);
+    state.settings.quietHoursEnd = normalizeClock(data.settings?.quietHoursEnd, DEFAULT_SETTINGS.quietHoursEnd);
+    state.settings.quietHoursTz = normalizeTimezone(data.settings?.quietHoursTz) || '';
     // Repair profile filter/group shapes from older snapshots.
     state.profiles = state.profiles.map((p) => {
       const profile = {

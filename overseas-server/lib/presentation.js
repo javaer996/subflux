@@ -292,6 +292,7 @@ export function buildState(store, tester, siteTester, chinaTester, startedAt, si
         latency: tester.pendingAuto?.size || 0,
         site: siteTester?.pendingAuto?.size || 0,
       },
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
       startedAt,
       uptimeSec: Math.round(process.uptime()),
       memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),

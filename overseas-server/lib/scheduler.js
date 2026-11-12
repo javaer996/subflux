@@ -1,5 +1,6 @@
 import { refreshSource, isRefreshing } from './refresher.js';
 import { pushProfile, nextPushAt } from './pusher.js';
+import { inQuietHours, quietHoursLabel, afterQuietHours, effectiveTimezone, formatInZone } from './quiet-hours.js';
 
 export class Scheduler {
   constructor(store, tester, siteTester) {
@@ -33,6 +34,9 @@ export class Scheduler {
     } else if (!settings.latencyNextAt || Number.isNaN(new Date(settings.latencyNextAt).getTime())) {
       settings.latencyNextAt = new Date(Date.now() + 60_000).toISOString();
     }
+    const quietNow = inQuietHours(settings);
+    settings.quietActive = quietNow;
+    settings.quietUntilAt = quietNow ? new Date(afterQuietHours(settings, Date.now())).toISOString() : null;
     this.store.touch();
     setTimeout(() => this.tick(), 1600).unref?.();
     this.timer = setInterval(() => this.tick(), 30_000);
@@ -49,6 +53,13 @@ export class Scheduler {
     this.ticking = true;
     try {
       const now = Date.now();
+      const settings = this.store.state.settings;
+      const quiet = inQuietHours(settings, now);
+      const quietNote = this.syncQuietNote(quiet);
+      // 夜间模式期间不启动任何定时任务；到点没跑的任务不会丢，
+      // 夜间结束后 tick 继续看到它仍然过期，会立刻补跑一次。
+      if (quietNote) this.store.touch();
+      if (quiet) return;
       const autoSources = this.store.state.settings.autoRefresh === false ? [] : this.store.state.sources
         .filter((s) => s.enabled && s.kind !== 'text' && s.autoRefresh !== false && !isRefreshing(s.id))
         .filter((s) => {
@@ -77,6 +88,29 @@ export class Scheduler {
       this.ticking = false;
     }
   }
+
+  /** 夜间模式状态变化时记一条事件，并在设置里记下预计恢复时间。 */
+  /**
+   * 同步夜间模式状态：状态切换时记事件，区间被改动时及时刷新预计恢复时间。
+   * 返回是否需要写库。
+   */
+  syncQuietNote(quiet) {
+    const settings = this.store.state.settings;
+    const active = quiet === true;
+    const label = quietHoursLabel(settings) || '夜间模式';
+    const untilIso = active ? new Date(afterQuietHours(settings)).toISOString() : null;
+    const changed = settings.quietActive !== active;
+    const untilChanged = (settings.quietUntilAt || null) !== untilIso;
+    if (!changed && !untilChanged) return false;
+    settings.quietActive = active;
+    settings.quietUntilAt = untilIso;
+    if (!changed) return true;
+    this.store.addEvent(active ? 'info' : 'success', active
+      ? `进入${label}，暂停全部定时任务，${formatInZone(afterQuietHours(settings), effectiveTimezone(settings))} 起恢复`
+      : `${label}结束，定时任务恢复`);
+    return true;
+  }
+
 
   latencyDue(now = Date.now()) {
     const settings = this.store.state.settings;

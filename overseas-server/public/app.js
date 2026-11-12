@@ -2638,6 +2638,110 @@ function taskCard(title, icon, job, queue, kind) {
     </div>`;
 }
 
+const CLOCK_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+/** 夜间区间按「设置里选的时区」解释；留空则用服务器时区。 */
+function quietTimezone(s) {
+  return s?.quietHoursTz || App.state?.meta?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+/** 目标时区里当前的分钟数（0–1439）。 */
+function quietMinutesNow(timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour12: false, hour: '2-digit', minute: '2-digit' }).formatToParts(new Date());
+    const get = (t) => Number(parts.find((p) => p.type === t)?.value || 0);
+    return (get('hour') % 24) * 60 + get('minute');
+  } catch {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  }
+}
+
+/** 当前时间是否落在夜间区间内（与后端 lib/quiet-hours.js 规则一致）。 */
+function quietHoursActive(s) {
+  if (s?.quietHoursEnabled !== true) return false;
+  const from = CLOCK_RE.exec(String(s.quietHoursStart || '').trim());
+  const to = CLOCK_RE.exec(String(s.quietHoursEnd || '').trim());
+  if (!from || !to) return false;
+  const a = Number(from[1]) * 60 + Number(from[2]);
+  const b = Number(to[1]) * 60 + Number(to[2]);
+  if (a === b) return false;
+  const m = quietMinutesNow(quietTimezone(s));
+  return a < b ? m >= a && m < b : m >= a || m < b;
+}
+
+/** 把夜间恢复时间按所选时区显示出来。 */
+function quietUntilText(s) {
+  if (!s?.quietUntilAt) return '';
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: quietTimezone(s), hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).format(new Date(s.quietUntilAt));
+  } catch {
+    return fmtTime(s.quietUntilAt);
+  }
+}
+
+function quietHoursHint(s) {
+  if (s.quietHoursEnabled !== true) return '未启用：所有定时任务按各自计划正常执行。';
+  if (s.quietHoursStart === s.quietHoursEnd) return '开始与结束时间相同，请改成有效的区间。';
+  if (quietHoursActive(s)) {
+    const until = quietUntilText(s);
+    return `现在处于夜间模式，定时任务已暂停${until ? `，预计 ${until} 起恢复` : ''}。`;
+  }
+  return `当前不在夜间模式，定时任务正常执行；下次 ${esc(s.quietHoursStart)} 开始暂停。`;
+}
+
+/** 夜间模式即时保存：改开关、时间或时区后直接写库，不需要再点保存设置。 */
+let quietSaving = false;
+async function saveQuietHours() {
+  if (quietSaving) return;
+  const enabled = $('#quiet-enabled')?.checked === true;
+  const start = $('#setting-quiet-start')?.value || '23:00';
+  const end = $('#setting-quiet-end')?.value || '07:00';
+  let tz = $('#setting-quiet-tz')?.value ?? '';
+  let tzNote = '';
+  // 打开夜间模式但没填时区、而浏览器与服务器不在同一个时区时，直接按你所在时区写进去，
+  // 免得「23:00」被理解成服务器时区（UTC 容器很常见）。
+  if (enabled && !tz && quietBrowserZone() && quietBrowserZone() !== quietServerZone()) {
+    tz = quietBrowserZone();
+    tzNote = `，时区按你所在的 ${tz} 计算`;
+  }
+  quietSaving = true;
+  try {
+    await api('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ quietHoursEnabled: enabled, quietHoursStart: start, quietHoursEnd: end, quietHoursTz: tz }),
+    });
+    await refreshState(false);
+    render({ quiet: true });
+    toast(enabled ? `夜间模式已开启：${start}–${end} 期间暂停定时任务${tzNote}` : '夜间模式已关闭', 'success');
+  } catch (err) {
+    toast(err.message, 'error', 6000);
+    await refreshState(false).catch(() => {});
+    render({ quiet: true });
+  } finally {
+    quietSaving = false;
+  }
+}
+
+/** 服务器时区（来自 /api/state 的 meta）。 */
+function quietServerZone() {
+  return App.state?.meta?.timezone || 'UTC';
+}
+
+/** 浏览器时区。 */
+function quietBrowserZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+}
+
+/** 时区下拉建议：浏览器时区 + 服务器时区 + 常见时区，去重后按字母排序。 */
+function quietZoneOptions(current = '') {
+  const common = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Bangkok', 'Asia/Dubai', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
+  const all = [quietBrowserZone(), quietServerZone(), current, ...common].filter(Boolean);
+  return [...new Set(all)].map((tz) => `<option value="${esc(tz)}"></option>`).join('');
+}
+
 function renderTasks() {
   const state = App.state;
   if (!state) return '';
@@ -2656,7 +2760,7 @@ function renderTasks() {
   const events = (state.events || []).slice(0, 8);
   return `
     <section class="view">
-      ${pageHead('TASKS', '任务中心', `当前 ${running.length + refreshing.length} 个任务在跑。测速、站点检测、CN 检测各自同时只跑一个，后来的任务排队等待；不同订阅源的刷新可以并行，刷新和检测也可以同时进行。`, `<button class="btn btn-primary" data-action="test-all">${ico('activity')}<span>立即握手测试全部</span></button>`)}
+      ${pageHead('TASKS', '任务中心', `${quietHoursActive(s) ? '<b style="color:var(--amber)">夜间模式生效中：定时任务暂停，手动操作不受影响。</b> ' : ''}当前 ${running.length + refreshing.length} 个任务在跑。测速、站点检测、CN 检测各自同时只跑一个，后来的任务排队等待；不同订阅源的刷新可以并行，刷新和检测也可以同时进行。`, `<button class="btn btn-primary" data-action="test-all">${ico('activity')}<span>立即握手测试全部</span></button>`)}
       <div class="task-grid">
         ${jobs.map((item) => taskCard(item.title, item.icon, item.job, item.queue, item.kind)).join('')}
         <div class="card task-card">
@@ -2670,6 +2774,32 @@ function renderTasks() {
             : '<div class="task-sub">没有正在刷新的订阅源</div>'}
           <div class="task-sub">同一订阅源不会重复刷新，不同订阅源之间并行。</div>
         </div>
+      </div>
+
+      <div class="card settings-section">
+        <h2>夜间模式</h2>
+        <div class="desc">开启后，在这段时间里不执行任何定时任务：订阅刷新、定时握手测速、定时推送都不会到点触发。手动刷新、手动测试、立即推送不受影响；夜间错过的任务会在结束后补跑一次。</div>
+        <div class="form-grid">
+          <div class="field-row card card-pad span-2" style="padding:11px 13px">
+            <div><div class="field-label">启用夜间模式</div><div class="field-hint">修改后立即生效，不需要点保存。</div></div>
+            <label class="switch"><input type="checkbox" id="quiet-enabled" data-quiet-field="quietHoursEnabled" ${s.quietHoursEnabled === true ? 'checked' : ''}><span class="track"></span></label>
+          </div>
+          <div class="field">
+            <label for="setting-quiet-start">开始时间</label>
+            <input class="input" id="setting-quiet-start" data-quiet-field="quietHoursStart" type="time" value="${esc(s.quietHoursStart || '23:00')}">
+          </div>
+          <div class="field">
+            <label for="setting-quiet-end">结束时间</label>
+            <input class="input" id="setting-quiet-end" data-quiet-field="quietHoursEnd" type="time" value="${esc(s.quietHoursEnd || '07:00')}">
+          </div>
+          <div class="field span-2">
+            <label for="setting-quiet-tz">时区</label>
+            <input class="input" id="setting-quiet-tz" data-quiet-field="quietHoursTz" list="quiet-tz-list" autocomplete="off" value="${esc(s.quietHoursTz || '')}" placeholder="留空跟随服务器（${esc(quietServerZone())}）">
+            <datalist id="quiet-tz-list">${quietZoneOptions(s.quietHoursTz)}</datalist>
+            <div class="field-hint">开始与结束时间按这个时区解释，支持跨零点（例如 23:00 → 07:00）。服务器时区是 ${esc(quietServerZone())}，你的浏览器是 ${esc(quietBrowserZone())}，输入框里可直接输入时区名筛选。</div>
+          </div>
+        </div>
+        <div class="field-hint" id="quiet-hint" style="margin-top:10px">${quietHoursHint(s)}</div>
       </div>
 
       <div class="card settings-section">
@@ -3725,6 +3855,10 @@ function bindGlobalEvents() {
       if (target.checked) App.selected.add(target.dataset.nodeSelect);
       else App.selected.delete(target.dataset.nodeSelect);
       render();
+      return;
+    }
+    if (target.matches('[data-quiet-field]')) {
+      saveQuietHours();
       return;
     }
     if (target.matches('select[data-node-filter]')) {

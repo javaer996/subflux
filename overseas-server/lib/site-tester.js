@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { inQuietHours } from './quiet-hours.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import net from 'node:net';
@@ -370,7 +371,11 @@ export class SiteTester {
         const map = new Map(this.store.state.nodes.map((n) => [n.id, n]));
         const list = ids.map((id) => map.get(id)).filter(Boolean);
         const sites = (this.store.state.settings.sites || []).filter((s) => s.enabled !== false);
-        if (list.length && sites.length) {
+        // 夜间模式期间不自动续跑：节点放回队列，等夜间结束后的定时任务再测。
+        if (inQuietHours(this.store.state.settings)) {
+          for (const node of list) this.pendingAuto.add(node.id);
+          this.store.touch();
+        } else if (list.length && sites.length) {
           setTimeout(() => this.start(list, sites, { label: '自动站点检测', auto: true }), 600).unref?.();
         }
       }

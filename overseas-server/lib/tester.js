@@ -1,5 +1,6 @@
 import { uid } from './util.js';
 import { isUdpProtocol } from './proxy-probe.js';
+import { inQuietHours } from './quiet-hours.js';
 
 function snapshotJob(job) {
   if (!job) return null;
@@ -199,6 +200,12 @@ export class Tester {
       this.pendingAuto.clear();
       const map = new Map(this.store.state.nodes.map((n) => [n.id, n]));
       const list = ids.map((id) => map.get(id)).filter(Boolean);
+      // 夜间模式期间不自动开跑排队的测试：把节点放回队列，等夜间结束后的定时任务再测。
+      if (inQuietHours(this.store.state.settings)) {
+        for (const node of list) this.pendingAuto.add(node.id);
+        this.store.touch();
+        return;
+      }
       if (list.length) {
         const tcp = this.pendingAutoTcp;
         this.pendingAutoTcp = false;
