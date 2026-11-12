@@ -95,7 +95,6 @@ const App = {
   fastPoll: false,
   refreshingAll: false,
   lastJobRunning: false,
-  focusSearch: false,
   modalOpen: false,
   drawer: null,
   saving: false,
@@ -873,10 +872,6 @@ function renderSources() {
   const state = App.state;
   const sources = state.sources;
   const s = state.stats.sources;
-  const query = App.sourceQuery.trim().toLowerCase();
-  const filtered = query
-    ? sources.filter((src) => `${src.name} ${src.url}`.toLowerCase().includes(query))
-    : sources;
   return `
     <section class="view">
       ${pageHead('SOURCES', '订阅源', '每个订阅独立设置刷新周期、请求身份与启用状态。HTTP 响应会被自动识别为 Clash YAML、Base64 或节点链接列表。', `
@@ -895,18 +890,43 @@ function renderSources() {
           <input class="input" id="source-search" placeholder="搜索名称或域名…" value="${esc(App.sourceQuery)}">
         </div>
       </div>
-      ${filtered.length ? `<div class="source-grid">${filtered.map(sourceCard).join('')}</div>` : sources.length ? `
-        <div class="card"><div class="empty"><div class="empty-art">${ico('search')}</div><h3>没有匹配的订阅源</h3><p>换一个关键词试试。</p><button class="btn btn-ghost btn-sm" data-action="clear-source-search">清空搜索</button></div></div>
-      ` : `
-        <div class="card"><div class="empty" style="padding:70px 24px">
+      <div id="source-results">${sourceResultsHtml()}</div>
+      <div style="margin-top:16px">${alertBox('info', '订阅地址通常包含个人令牌。SubFlux 会隐藏 URL 的查询参数显示，但数据仍保存在本机 <span class="code-inline">data/db.json</span> 中；请勿把面板直接暴露到公网。')}</div>
+    </section>`;
+}
+
+/** 订阅源列表(含搜索过滤结果),单独渲染以便输入时只替换列表。 */
+function sourceResultsHtml() {
+  const sources = App.state?.sources || [];
+  const query = App.sourceQuery.trim().toLowerCase();
+  const filtered = query
+    ? sources.filter((src) => `${src.name} ${src.url}`.toLowerCase().includes(query))
+    : sources;
+  if (filtered.length) return `<div class="source-grid">${filtered.map(sourceCard).join('')}</div>`;
+  if (sources.length) {
+    return `<div class="card"><div class="empty"><div class="empty-art">${ico('search')}</div><h3>没有匹配的订阅源</h3><p>换一个关键词试试。</p><button class="btn btn-ghost btn-sm" data-action="clear-source-search">清空搜索</button></div></div>`;
+  }
+  return `<div class="card"><div class="empty" style="padding:70px 24px">
           <div class="empty-art">${ico('rss')}</div>
           <h3>订阅池还是空的</h3>
           <p>支持订阅链接、Clash 配置文本或 Base64。添加后会自动抓取并解析节点，之后按周期刷新。</p>
           <button class="btn btn-primary" data-action="add-source">${ico('plus')}<span>添加订阅源</span></button>
-        </div></div>
-      `}
-      <div style="margin-top:16px">${alertBox('info', '订阅地址通常包含个人令牌。SubFlux 会隐藏 URL 的查询参数显示，但数据仍保存在本机 <span class="code-inline">data/db.json</span> 中；请勿把面板直接暴露到公网。')}</div>
-    </section>`;
+        </div></div>`;
+}
+
+/** 只重绘订阅源列表,输入框保持不动(手机端不会反复收起键盘)。 */
+function refreshSourceResults() {
+  if (App.view !== 'sources') {
+    render();
+    return;
+  }
+  const host = $('#source-results');
+  if (!host) {
+    render();
+    return;
+  }
+  host.innerHTML = sourceResultsHtml();
+  hydrateIcons(host);
 }
 
 function sourceCard(source) {
@@ -1314,21 +1334,7 @@ function renderNodes() {
       `)}
       <div id="job-slot">${jobBanner()}</div>
       ${renderNodeFilters()}
-      <div class="card" style="overflow:hidden">
-        <div class="table-toolbar">
-          <div class="left">
-            <span class="small" style="color:var(--text-soft);font-weight:550">共 ${fmtNum(data.total)} 个节点</span>
-            ${selectedCount ? `<span class="selection-note">已选 ${selectedCount} 个</span>` : ''}
-            ${data.total ? `<span class="tiny dim">第 ${data.page} / ${data.pages} 页</span>` : ''}
-          </div>
-          <div class="right">
-            ${selectedCount ? `<button class="link" data-action="clear-selection" style="font-size:10.5px">清空选择</button>` : ''}
-            <button class="btn btn-ghost btn-sm" data-action="test-filter" ${data.total ? '' : 'disabled'}>${ico('activity')}<span>测试筛选结果</span></button>
-          </div>
-        </div>
-        ${data.items.length ? nodeTable(data) : nodeEmptyState()}
-        ${data.total ? nodePagination(data) : ''}
-      </div>
+      ${nodeResultsCard()}
       <div style="margin-top:16px">${alertBox('info', '入口质量分是启发式参考：家宽 / 移动 / 企业 / 机房由 ASN 与 hosting/mobile 标记推断，CDN 节点看到的是 CDN 入口而非落地 IP。站点标记则是通过节点真实代理访问网站后的结果，更接近实际可用性。')}</div>
     </section>`;
 }
@@ -1357,6 +1363,46 @@ function jobBanner() {
       <div class="job-progress"><i style="width:${pct}%"></i></div>
       <span class="job-pct">${pct}%</span>
     </div>`;
+}
+
+/** 节点池结果区(表格 / 空状态 / 分页),单独渲染以便搜索时只替换这一块。 */
+function nodeResultsCard() {
+  const data = App.nodeData || { items: [], total: 0, page: 1, pages: 1, pageSize: App.nodePageSize };
+  const selectedCount = App.selected.size;
+  return `
+      <div class="card" id="node-results" style="overflow:hidden">
+        <div class="table-toolbar">
+          <div class="left">
+            <span class="small" style="color:var(--text-soft);font-weight:550">共 ${fmtNum(data.total)} 个节点</span>
+            ${selectedCount ? `<span class="selection-note">已选 ${selectedCount} 个</span>` : ''}
+            ${data.total ? `<span class="tiny dim">第 ${data.page} / ${data.pages} 页</span>` : ''}
+          </div>
+          <div class="right">
+            ${selectedCount ? `<button class="link" data-action="clear-selection" style="font-size:10.5px">清空选择</button>` : ''}
+            <button class="btn btn-ghost btn-sm" data-action="test-filter" ${data.total ? '' : 'disabled'}>${ico('activity')}<span>测试筛选结果</span></button>
+          </div>
+        </div>
+        ${data.items.length ? nodeTable(data) : nodeEmptyState()}
+        ${data.total ? nodePagination(data) : ''}
+      </div>`;
+}
+
+/** 只重绘结果区,不碰顶部的筛选栏,避免输入框被重建导致手机端收起键盘。 */
+function refreshNodeResults() {
+  if (App.view !== 'nodes') {
+    render();
+    return;
+  }
+  const host = $('#node-results');
+  if (!host) {
+    render();
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.innerHTML = nodeResultsCard().trim();
+  const next = wrap.firstElementChild;
+  host.replaceWith(next);
+  hydrateIcons(next);
 }
 
 function renderNodeFilters() {
@@ -1624,19 +1670,6 @@ function nodeFilterPayload() {
     if (f[key]) out[key] = f[key];
   }
   return out;
-}
-
-function restoreNodeSearchFocus() {
-  if (!App.focusSearch) return;
-  App.focusSearch = false;
-  requestAnimationFrame(() => {
-    const input = $('#node-search');
-    if (input) {
-      input.focus();
-      const len = input.value.length;
-      input.setSelectionRange(len, len);
-    }
-  });
 }
 
 async function cancelTask(kind) {
@@ -3118,10 +3151,41 @@ function bindSettings() {
 
 /* ------------------------- routing / refresh ------------------------- */
 
+/** 记住当前正在编辑的输入框,整页重绘后还原焦点与光标位置。 */
+function captureFocus() {
+  const el = document.activeElement;
+  const app = $('#app');
+  if (!el || !app || !app.contains(el)) return null;
+  if (!['INPUT', 'TEXTAREA'].includes(el.tagName)) return null;
+  if (['checkbox', 'radio', 'button', 'submit', 'file'].includes(el.type)) return null;
+  const key = el.id
+    ? `#${el.id}`
+    : el.dataset?.nodeFilter
+      ? `[data-node-filter="${el.dataset.nodeFilter}"]`
+      : '';
+  if (!key) return null;
+  return { key, start: el.selectionStart, end: el.selectionEnd };
+}
+
+function restoreFocus(snap) {
+  if (!snap) return;
+  const el = document.querySelector(snap.key);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (typeof snap.start === 'number' && el.setSelectionRange) {
+    try {
+      el.setSelectionRange(snap.start, snap.end);
+    } catch {
+      /* number 类型输入框不支持选区,忽略 */
+    }
+  }
+}
+
 function render(options = {}) {
   if (!App.state) return;
   const app = $('#app');
   if (!app) return;
+  const focus = captureFocus();
   app.classList.toggle('quiet', Boolean(options.quiet));
   let html = '';
   if (App.view === 'sources') html = renderSources();
@@ -3135,8 +3199,7 @@ function render(options = {}) {
   updateChrome();
   if (App.view === 'settings') bindSettings();
   refreshAllRuleBuilders();
-  restoreNodeSearchFocus();
-  restoreSourceSearchFocus();
+  restoreFocus(focus);
 }
 
 function checkAssetsStale(data) {
@@ -3198,6 +3261,8 @@ async function poll() {
       schedulePoll(running ? 2200 : 12000);
       return;
     }
+    // 输入框有焦点时不整页重绘,否则手机上键盘会被收起;只更新任务条。
+    if (App.view === 'nodes' && (data.job?.running || data.siteJob?.running || data.chinaJob?.running)) updateJobSlot();
     const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
     if (typing) {
       schedulePoll(running ? 2200 : 12000);
@@ -3234,19 +3299,6 @@ function updateChromeOffline() {
   if (top) top.innerHTML = `<span class="status-dot is-error"></span><span>连接中断</span>`;
   const side = $('#side-status-text');
   if (side) side.textContent = '连接中断';
-}
-
-function restoreSourceSearchFocus() {
-  if (!App.focusSourceSearch) return;
-  App.focusSourceSearch = false;
-  requestAnimationFrame(() => {
-    const input = $('#source-search');
-    if (input) {
-      input.focus();
-      const len = input.value.length;
-      input.setSelectionRange(len, len);
-    }
-  });
 }
 
 function renderFatal(error) {
@@ -3504,7 +3556,6 @@ function resetNodeFilters() {
 }
 
 let nodeSearchTimer = null;
-let sourceSearchTimer = null;
 
 function bindGlobalEvents() {
   document.addEventListener('click', (event) => {
@@ -3625,20 +3676,17 @@ function bindGlobalEvents() {
     }
     if (target.id === 'source-search') {
       App.sourceQuery = target.value;
-      App.focusSourceSearch = true;
-      clearTimeout(sourceSearchTimer);
-      sourceSearchTimer = setTimeout(render, 220);
+      refreshSourceResults();
       return;
     }
     if (target.matches('[data-node-filter="q"]')) {
       App.nodeFilters.q = target.value;
       App.selected.clear();
-      App.focusSearch = true;
       clearTimeout(nodeSearchTimer);
       nodeSearchTimer = setTimeout(async () => {
         App.nodePage = 1;
         await loadNodes();
-        render();
+        refreshNodeResults();
       }, 320);
       return;
     }
