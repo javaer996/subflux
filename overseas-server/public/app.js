@@ -933,7 +933,7 @@ function sourceCard(source) {
             ${statusPill(source)}
             <span class="badge badge-muted no-dot">${source.kind === 'text' ? '手动导入' : (source.format ? esc(source.format) : '待解析')}</span>
             ${manualOnly && source.kind !== 'text' ? '<span class="badge badge-amber">仅手动刷新</span>' : ''}
-            ${source.proxyMode === 'pool' ? '<span class="badge badge-blue">代理拉取 · 节点池</span>' : (source.proxyMode === 'custom' || source.useProxy) ? '<span class="badge badge-blue">代理拉取 · 外部</span>' : ''}
+            ${source.proxyMode === 'auto' ? '<span class="badge badge-blue">代理拉取 · 自动</span>' : source.proxyMode === 'pool' ? '<span class="badge badge-blue">代理拉取 · 指定节点</span>' : (source.proxyMode === 'custom' || source.useProxy) ? '<span class="badge badge-blue">代理拉取 · 外部</span>' : ''}
           </div>
         </div>
         <div class="source-actions">
@@ -966,7 +966,7 @@ function sourceCard(source) {
         ${!source.error && source.warnings?.length ? `<div class="source-card-warning">${ico('info')} ${esc(source.warnings.slice(0, 2).join('；'))}</div>` : ''}
       </div>
       <div class="source-card-foot">
-        <span class="time">上次 ${source.lastRefreshAt ? `${relTime(source.lastRefreshAt)} · ${fmtTime(source.lastRefreshAt)}` : '从未刷新'}</span>
+        <span class="time">上次 ${source.lastRefreshAt ? `${relTime(source.lastRefreshAt)} · ${fmtTime(source.lastRefreshAt)}` : '从未刷新'}${source.proxyMode !== 'direct' && source.lastFetchProxy ? ` · 经 ${esc(source.lastFetchProxy)}${source.lastFetchAttempts > 1 ? `（第 ${source.lastFetchAttempts} 个出口）` : ''}` : ''}</span>
         <div style="display:flex;gap:5px">
           <button class="btn btn-ghost btn-sm" data-action="refresh-source" data-id="${esc(source.id)}" ${source.status === 'refreshing' ? 'disabled' : ''}>${ico('refresh')}<span>刷新</span></button>
           <button class="btn btn-ghost btn-sm" data-action="edit-source" data-id="${esc(source.id)}">${ico('edit')}<span>编辑</span></button>
@@ -1041,18 +1041,26 @@ function openSourceModal(source = null) {
         <label for="source-proxy-mode">拉取方式</label>
         <select class="input" id="source-proxy-mode" name="proxyMode">
           <option value="direct" ${proxyMode === 'direct' ? 'selected' : ''}>直连（服务器直接请求订阅站）</option>
-          <option value="pool" ${proxyMode === 'pool' ? 'selected' : ''}>使用节点池中的节点</option>
+          <option value="auto" ${proxyMode === 'auto' ? 'selected' : ''}>自动选择最优可用节点（推荐）</option>
+          <option value="pool" ${proxyMode === 'pool' ? 'selected' : ''}>指定节点池中的节点</option>
           <option value="custom" ${proxyMode === 'custom' ? 'selected' : ''}>外部代理地址</option>
         </select>
-        <div class="field-hint">订阅站被墙、限制 IP 或需要固定出口时，可让抓取请求走已有节点或本地代理。</div>
+        <div class="field-hint">订阅站被墙、限制 IP 或需要固定出口时，可让抓取请求走已有节点或本地代理。自动模式按质量分从高到低挑选能连通的节点，失败会换下一个，最多试 3 个。</div>
       </div>
       <div class="field" id="source-proxy-pool-row" style="display:none">
         <label for="source-proxy-node">拉取出口节点</label>
         <div class="form-grid">
-          <input class="input" id="source-proxy-search" placeholder="搜索节点名 / 地区">
+          <input class="input" id="source-proxy-search" placeholder="搜索节点名 / 地区 / 协议">
           <select class="input" id="source-proxy-node" name="proxyNodeId"></select>
         </div>
-        <div class="field-hint" id="source-proxy-node-hint">按质量排序显示前 200 个节点，输入关键词可搜索全部。</div>
+        <div class="field-row" style="margin-top:6px;align-items:center">
+          <div class="field-hint" id="source-proxy-node-hint">按质量排序，输入关键词可搜索全部节点。</div>
+          <button type="button" class="btn btn-ghost btn-sm" id="source-proxy-more" style="display:none">加载更多</button>
+        </div>
+        <div class="field-row" style="margin-top:10px">
+          <span class="field-hint">指定节点不可用时，自动改用其它可用节点重试（最多 3 个）</span>
+          <label class="switch"><input type="checkbox" name="proxyFallback" ${source?.proxyFallback !== false ? 'checked' : ''}><span class="track"></span></label>
+        </div>
       </div>
       <div class="field" id="source-proxy-custom-row" style="display:none">
         <label for="source-proxy-url">代理地址</label>
@@ -1132,25 +1140,48 @@ function openSourceModal(source = null) {
   const proxyNodeSel = $('#source-proxy-node');
   const proxySearch = $('#source-proxy-search');
   let proxyNodes = [];
-  const renderProxyNodes = (keyword = '') => {
+  let proxyPage = 0;
+  let proxyPages = 1;
+  let proxyTotal = 0;
+  let proxyKeyword = '';
+  const proxyMoreBtn = $('#source-proxy-more');
+  const proxyHint = $('#source-proxy-node-hint');
+  const proxyLabels = new Map();
+  const proxyState = (n) => (n.alive === true ? '' : n.alive === false ? ' · 不可达' : ' · 未测通');
+  const proxyLabel = (n) => `${n.name}${n.region ? ` · ${n.region}` : ''}${n.protocol ? ` · ${String(n.protocol).toUpperCase()}` : ''}${proxyState(n)}`;
+  const renderProxyNodes = () => {
     if (!proxyNodeSel) return;
-    const kw = keyword.trim().toLowerCase();
-    const list = kw
-      ? proxyNodes.filter((n) => `${n.name} ${n.region || ''} ${n.isp || ''}`.toLowerCase().includes(kw))
-      : proxyNodes;
     const current = proxyNodeSel.value || source?.proxyNodeId || '';
-    proxyNodeSel.innerHTML = list.length
-      ? list.map((n) => `<option value="${esc(n.id)}" ${n.id === current ? 'selected' : ''}>${esc(n.name)}${n.region ? ` · ${esc(n.region)}` : ''}</option>`).join('')
-      : '<option value="">没有匹配的节点</option>';
+    const rows = proxyNodes.map((n) => `<option value="${esc(n.id)}" ${n.id === current ? 'selected' : ''}>${esc(proxyLabel(n))}</option>`);
+    // 编辑已有订阅时，指定节点可能不在这批结果里，补一条占位项，避免下拉框
+    // 静默跳到第一个节点、把用户原来的选择覆盖掉。
+    if (current && !proxyNodes.some((n) => n.id === current)) {
+      rows.unshift(`<option value="${esc(current)}" selected>${esc(proxyLabels.get(current) || source?.proxyNodeName || '已指定的节点')}（当前指定）</option>`);
+    }
+    proxyNodeSel.innerHTML = rows.length ? rows.join('') : '<option value="">没有匹配的节点</option>';
+    if (proxyHint) {
+      proxyHint.textContent = proxyTotal
+        ? `共 ${proxyTotal} 个节点，已显示 ${proxyNodes.length} 个${proxyPages > proxyPage ? '，可点「加载更多」继续翻' : ''}；输入关键词可搜索全部。`
+        : '没有可用节点，请先在节点池刷新或测速。';
+    }
+    if (proxyMoreBtn) proxyMoreBtn.style.display = proxyPages > proxyPage ? '' : 'none';
   };
-  const loadProxyNodes = async (keyword = '') => {
+  const loadProxyNodes = async ({ keyword = proxyKeyword, page = 1, append = false } = {}) => {
     if (!proxyNodeSel) return;
+    proxyKeyword = keyword;
     try {
-      const params = new URLSearchParams({ pageSize: '200', status: 'all', sort: 'quality' });
+      const params = new URLSearchParams({ pageSize: '200', status: 'usable', sort: 'quality', page: String(page) });
       if (keyword.trim()) params.set('q', keyword.trim());
       const data = await api(`/api/nodes?${params.toString()}`);
-      proxyNodes = data.items || [];
-      renderProxyNodes('');
+      const items = data.items || [];
+      for (const n of items) proxyLabels.set(n.id, proxyLabel(n));
+      proxyNodes = append
+        ? proxyNodes.concat(items.filter((n) => !proxyNodes.some((p) => p.id === n.id)))
+        : items;
+      proxyPage = data.page || page;
+      proxyPages = data.pages || 1;
+      proxyTotal = data.total || proxyNodes.length;
+      renderProxyNodes();
     } catch {
       proxyNodeSel.innerHTML = '<option value="">节点加载失败</option>';
     }
@@ -1159,13 +1190,12 @@ function openSourceModal(source = null) {
     const mode = proxyModeSel?.value || 'direct';
     if (proxyPoolRow) proxyPoolRow.style.display = mode === 'pool' ? '' : 'none';
     if (proxyCustomRow) proxyCustomRow.style.display = mode === 'custom' ? '' : 'none';
-    if (mode === 'pool' && !proxyNodes.length) loadProxyNodes('');
+    if (mode === 'pool' && !proxyNodes.length) loadProxyNodes({ page: 1 });
   };
   proxyModeSel?.addEventListener('change', syncProxyMode);
+  proxyMoreBtn?.addEventListener('click', () => loadProxyNodes({ page: proxyPage + 1, append: true }));
   proxySearch?.addEventListener('input', debounce((event) => {
-    const keyword = String(event.target.value || '').trim();
-    if (keyword.length >= 2) loadProxyNodes(keyword);
-    else renderProxyNodes(keyword);
+    loadProxyNodes({ keyword: String(event.target.value || '').trim(), page: 1 });
   }, 320));
   syncProxyMode();
 
@@ -1184,6 +1214,7 @@ function openSourceModal(source = null) {
       proxyMode: selectedKind === 'url' ? (proxyModeSel?.value || 'direct') : 'direct',
       proxyNodeId: selectedKind === 'url' && proxyModeSel?.value === 'pool' ? String(fd.get('proxyNodeId') || '') : '',
       proxyUrl: selectedKind === 'url' && proxyModeSel?.value === 'custom' ? String(fd.get('proxyUrl') || '').trim() : '',
+      proxyFallback: proxyModeSel?.value === 'pool' ? fd.get('proxyFallback') === 'on' : true,
       enabled: fd.get('enabled') === 'on',
     };
     if (selectedKind === 'url') payload.url = String(fd.get('url') || '').trim();
@@ -1233,6 +1264,7 @@ async function openSourcePreview(id) {
           <div class="source-stat"><span>识别格式</span><b>${esc(data.format)}</b></div>
           <div class="source-stat"><span>解析节点</span><b>${fmtNum(data.count)}</b></div>
           <div class="source-stat"><span>订阅流量</span><b>${data.traffic?.total > 0 ? `${esc(data.traffic.usedLabel)} / ${esc(data.traffic.totalLabel)}` : '未上报'}</b></div>
+          <div class="source-stat"><span>拉取出口</span><b>${data.proxyLabel ? `${esc(data.proxyLabel)}${data.proxyAttempts > 1 ? `（第 ${data.proxyAttempts} 个）` : ''}` : '直连'}</b></div>
         </div>
         ${data.sample?.length ? `
           <div class="card" style="box-shadow:none;overflow:hidden">

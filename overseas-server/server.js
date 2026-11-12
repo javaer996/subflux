@@ -354,7 +354,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, {
       ok: true,
       sources: store.state.sources
-        .map((s) => serializeSource(s, store.state.settings))
+        .map((s) => serializeSource(s, store.state.settings, store.state.nodes))
         .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)),
     });
   }
@@ -380,7 +380,7 @@ async function handleApi(req, res, url) {
     await store.flush();
     return sendJson(res, 201, {
       ok: true,
-      source: serializeSource(source, store.state.settings),
+      source: serializeSource(source, store.state.settings, store.state.nodes),
     });
   }
 
@@ -398,6 +398,7 @@ async function handleApi(req, res, url) {
       proxyNodeId: s.proxyNodeId || '',
       proxyNodeName: store.state.nodes.find((n) => n.id === s.proxyNodeId)?.name || '',
       proxyUrl: s.proxyUrl || '',
+      proxyFallback: s.proxyFallback !== false,
     }));
     const payload = {
       app: 'subflux',
@@ -443,12 +444,15 @@ async function handleApi(req, res, url) {
           skipped += 1;
           continue;
         }
-        if (source.proxyMode === 'pool') {
+        if (source.proxyMode === 'pool' || source.proxyMode === 'auto') {
           const wantedId = String(item.proxyNodeId || '');
           const wantedName = String(item.proxyNodeName || '');
           const node = store.state.nodes.find((n) => n.id === wantedId) || (wantedName && store.state.nodes.find((n) => n.name === wantedName));
           if (node) {
             source.proxyNodeId = node.id;
+          } else if (source.proxyMode === 'auto') {
+            // 自动选择出口的源不需要钉死某个节点,保留 auto 模式即可。
+            source.proxyNodeId = '';
           } else {
             source.proxyMode = 'direct';
             source.proxyNodeId = '';
@@ -514,7 +518,7 @@ async function handleApi(req, res, url) {
       if (body.intervalMinutes !== undefined) source.intervalMinutes = safeInt(body.intervalMinutes, source.intervalMinutes, 5, 5256000);
       if (body.userAgent !== undefined) source.userAgent = String(body.userAgent || '').slice(0, 200);
       let changedProxy = false;
-      if (body.proxyMode !== undefined || body.proxyNodeId !== undefined || body.proxyUrl !== undefined || body.useProxy !== undefined) {
+      if (body.proxyMode !== undefined || body.proxyNodeId !== undefined || body.proxyUrl !== undefined || body.proxyFallback !== undefined || body.useProxy !== undefined) {
         let proxyFields;
         try {
           proxyFields = readProxyFields(body, source);
@@ -523,7 +527,8 @@ async function handleApi(req, res, url) {
         }
         changedProxy = proxyFields.proxyMode !== (source.proxyMode || 'direct')
           || proxyFields.proxyNodeId !== (source.proxyNodeId || '')
-          || proxyFields.proxyUrl !== (source.proxyUrl || '');
+          || proxyFields.proxyUrl !== (source.proxyUrl || '')
+          || proxyFields.proxyFallback !== (source.proxyFallback !== false);
         Object.assign(source, proxyFields);
         source.useProxy = proxyFields.proxyMode !== 'direct';
       }
@@ -551,7 +556,7 @@ async function handleApi(req, res, url) {
       }
       return sendJson(res, 200, {
         ok: true,
-        source: serializeSource(source, store.state.settings),
+        source: serializeSource(source, store.state.settings, store.state.nodes),
       });
     }
 
@@ -561,7 +566,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, result.ok ? 200 : 502, {
         ok: result.ok,
         result,
-        source: serializeSource(source, store.state.settings),
+        source: serializeSource(source, store.state.settings, store.state.nodes),
         ...(result.ok ? {} : { error: result.error }),
       });
     }
@@ -580,6 +585,8 @@ async function handleApi(req, res, url) {
           warnings: parsed.warnings,
           sample: parsed.nodes.slice(0, 12).map((n) => ({ name: n.name, protocol: n.protocol, server: n.server, port: n.port })),
           traffic: trafficInfo({ traffic: (await import('./lib/util.js')).parseTrafficHeader(fetched.headers['subscription-userinfo']) }),
+          proxyLabel: fetched.proxyLabel || '',
+          proxyAttempts: fetched.proxyAttempts || 0,
         });
       } catch (err) {
         return apiError(res, 502, errMessage(err));
@@ -1085,7 +1092,7 @@ async function serveSubscription(req, res, url, token, formatPart) {
 }
 
 
-const PROXY_MODES = new Set(['direct', 'pool', 'custom']);
+const PROXY_MODES = new Set(['direct', 'auto', 'pool', 'custom']);
 const PROXY_URL_RE = /^(https?|socks5h?|socks):\/\//i;
 
 /** 归一化订阅源拉取代理设置，兼容旧的 useProxy 布尔字段。 */
@@ -1100,10 +1107,20 @@ function readProxyFields(body, fallback = {}) {
   const url = body.proxyUrl !== undefined
     ? String(body.proxyUrl || '').trim().slice(0, 500)
     : (fallback.proxyUrl || '');
+  // 指定了节点但该节点失效时,是否自动改用其它可用节点兜底。
+  // 不传时跟随已有配置,新订阅默认开启。
+  const fallbackEnabled = body.proxyFallback !== undefined
+    ? body.proxyFallback === true || body.proxyFallback === 'on'
+    : (fallback.proxyFallback === false ? false : true);
   if (url && !PROXY_URL_RE.test(url)) {
     throw new Error('代理地址需要以 http://、https:// 或 socks5:// 开头');
   }
-  return { proxyMode: mode, proxyNodeId: nodeId, proxyUrl: url };
+  return {
+    proxyMode: mode,
+    proxyNodeId: nodeId,
+    proxyUrl: url,
+    proxyFallback: fallbackEnabled,
+  };
 }
 
 const server = http.createServer(async (req, res) => {

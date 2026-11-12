@@ -5,7 +5,7 @@ import { sourceBlockedReason, trafficInfo } from './traffic.js';
 import { certFilterPass } from './tls.js';
 import { formatBytes, IP_TYPE_LABELS, safeInt } from './util.js';
 
-export function serializeSource(source, settings) {
+export function serializeSource(source, settings, nodes = []) {
   const traffic = trafficInfo(source);
   const blocked = sourceBlockedReason(source, settings);
   return {
@@ -20,7 +20,11 @@ export function serializeSource(source, settings) {
     useProxy: Boolean(source.useProxy),
     proxyMode: source.proxyMode || (source.useProxy ? 'custom' : 'direct'),
     proxyNodeId: source.proxyNodeId || '',
+    proxyNodeName: (nodes.find((n) => n.id === source.proxyNodeId) || {}).name || '',
+    proxyFallback: source.proxyFallback !== false,
     proxyUrl: source.proxyUrl || '',
+    lastFetchProxy: source.lastFetchProxy || '',
+    lastFetchAttempts: source.lastFetchAttempts || 0,
     status: source.status,
     error: source.error || '',
     warnings: source.warnings || [],
@@ -267,7 +271,7 @@ export function buildState(store, tester, siteTester, chinaTester, startedAt, si
     sources: state.sources
       .slice()
       .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-      .map((s) => serializeSource(s, state.settings)),
+      .map((s) => serializeSource(s, state.settings, state.nodes)),
     profiles,
     events: state.events.slice(-36).reverse(),
     settings: state.settings,

@@ -3,7 +3,7 @@ import { nodeFingerprint } from './uri.js';
 import { parseTrafficHeader, sha1, errMessage, truncate } from './util.js';
 import { trafficInfo } from './traffic.js';
 import { fetch as undiciFetch } from 'undici';
-import { resolveFetchProxy, startUrlProxy } from './node-proxy.js';
+import { fetchProxyPlan, startNodeProxy, startUrlProxy } from './node-proxy.js';
 
 const inflight = new Set();
 const MAX_BODY = 15 * 1024 * 1024;
@@ -74,6 +74,38 @@ async function readLimited(res, maxBytes) {
   return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
 }
 
+async function requestSubscription(source, ua, timeout, proxy) {
+  const request = {
+    redirect: 'follow',
+    headers: {
+      'user-agent': ua,
+      accept: '*/*',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'cache-control': 'no-cache',
+    },
+    signal: AbortSignal.timeout(timeout),
+    ...(proxy ? { dispatcher: proxy.dispatcher } : {}),
+  };
+  let res;
+  try {
+    res = proxy ? await undiciFetch(source.url, request) : await fetch(source.url, request);
+  } catch (err) {
+    throw new Error(proxy ? `通过代理拉取订阅失败：${errMessage(err)}` : errMessage(err));
+  }
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText || ''}`.trim());
+  }
+  const length = Number(res.headers.get('content-length') || 0);
+  if (length && length > MAX_BODY) throw new Error('订阅内容超过 15MB 限制');
+  const text = await readLimited(res, MAX_BODY);
+  return {
+    text,
+    headers: Object.fromEntries(res.headers.entries()),
+    finalUrl: res.url,
+    status: res.status,
+  };
+}
+
 export async function fetchSubscription(source, settings, options = {}) {
   if (source.kind === 'text') {
     return {
@@ -81,44 +113,47 @@ export async function fetchSubscription(source, settings, options = {}) {
       headers: {},
       finalUrl: '',
       status: 200,
+      proxyLabel: '',
+      proxyAttempts: 0,
     };
   }
   const timeout = Math.max(5000, Math.min(90000, Number(settings.requestTimeoutMs) || 25000));
   const ua = source.userAgent || settings.userAgent || 'clash.meta/1.19.8';
-  const proxy = await resolveFetchProxy(source, settings, options.nodes || []);
-  try {
-    const request = {
-      redirect: 'follow',
-      headers: {
-        'user-agent': ua,
-        accept: '*/*',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'cache-control': 'no-cache',
-      },
-      signal: AbortSignal.timeout(timeout),
-      ...(proxy ? { dispatcher: proxy.dispatcher } : {}),
-    };
-    let res;
+  // 出口顺序：直连算一个出口；自动 / 指定节点则按优先级排好，失败就换下一个。
+  const plan = fetchProxyPlan(source, settings, options.nodes || []);
+  const steps = plan.length ? plan : [{ kind: 'direct' }];
+  const failures = [];
+  for (let i = 0; i < steps.length; i += 1) {
+    const step = steps[i];
+    const label = step.kind === 'node' ? step.node.name : step.kind === 'url' ? '外部代理' : '直连';
+    let proxy = null;
     try {
-      res = proxy ? await undiciFetch(source.url, request) : await fetch(source.url, request);
+      if (step.kind === 'node') proxy = await startNodeProxy(step.node.raw, settings);
+      else if (step.kind === 'url') proxy = await startUrlProxy(step.url, settings);
+      const result = await requestSubscription(source, ua, timeout, proxy);
+      return { ...result, proxyLabel: label, proxyAttempts: i + 1 };
     } catch (err) {
-      throw new Error(proxy ? `通过代理拉取订阅失败：${errMessage(err)}` : errMessage(err));
+      const message = errMessage(err);
+      failures.push({ label, error: message });
+      const next = steps[i + 1];
+      if (next) {
+        options.onRetry?.({
+          attempt: i + 1,
+          total: steps.length,
+          failed: label,
+          next: next.kind === 'node' ? next.node.name : '外部代理',
+          error: message,
+        });
+      }
+    } finally {
+      if (proxy) await proxy.close().catch(() => {});
     }
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText || ''}`.trim());
-    }
-    const length = Number(res.headers.get('content-length') || 0);
-    if (length && length > MAX_BODY) throw new Error('订阅内容超过 15MB 限制');
-    const text = await readLimited(res, MAX_BODY);
-    return {
-      text,
-      headers: Object.fromEntries(res.headers.entries()),
-      finalUrl: res.url,
-      status: res.status,
-    };
-  } finally {
-    if (proxy) await proxy.close().catch(() => {});
   }
+  if (failures.length > 1) {
+    const detail = failures.map((f, index) => `${index + 1}) ${f.label}：${f.error}`).join('；');
+    throw new Error(`已尝试 ${failures.length} 个出口都失败：${detail}`);
+  }
+  throw new Error(failures[0]?.error || '拉取订阅失败');
 }
 
 function mergeOldState(node, prev, now, source) {
@@ -154,7 +189,10 @@ export async function refreshSource(store, source, deps = {}) {
   source.error = null;
   store.touch();
   try {
-    const fetched = await fetchSubscription(source, state.settings, { nodes: state.nodes });
+    const fetched = await fetchSubscription(source, state.settings, {
+      nodes: state.nodes,
+      onRetry: (info) => store.addEvent('warn', `${source.name} 拉取出口「${info.failed}」失败，改用「${info.next}」重试（第 ${info.attempt + 1}/${info.total} 次）：${info.error}`, { sourceId: source.id }),
+    });
     const parsed = parseSubscription(fetched.text, {
       maxNodes: state.settings.maxNodesPerSource,
     });
@@ -204,6 +242,8 @@ export async function refreshSource(store, source, deps = {}) {
     source.warnings = parsed.warnings || [];
     source.lastDurationMs = Date.now() - started;
     source.contentBytes = fetched.text.length;
+    source.lastFetchProxy = truncate(fetched.proxyLabel || '', 120);
+    source.lastFetchAttempts = fetched.proxyAttempts || 0;
     source.finalUrl = truncate(fetched.finalUrl || '', 500);
     store.touch();
 
