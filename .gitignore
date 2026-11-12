@@ -31,3 +31,9 @@ tmp/
 china-probe/probe.pid
 china-probe/probe.log
 china-probe/.probe.pid
+
+# 本地临时验证实例
+.quiet-test/
+.fetch-test/
+.probe-test/
+.score-test/

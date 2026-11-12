@@ -1,6 +1,6 @@
 import { refreshSource, isRefreshing } from './refresher.js';
 import { pushProfile, nextPushAt } from './pusher.js';
-import { inQuietHours, quietHoursLabel, afterQuietHours, effectiveTimezone, formatInZone } from './quiet-hours.js';
+import { inQuietHours, quietHoursLabel, afterQuietHours, serverTimezone, formatInZone } from './quiet-hours.js';
 
 export class Scheduler {
   constructor(store, tester, siteTester) {
@@ -106,7 +106,7 @@ export class Scheduler {
     settings.quietUntilAt = untilIso;
     if (!changed) return true;
     this.store.addEvent(active ? 'info' : 'success', active
-      ? `进入${label}，暂停全部定时任务，${formatInZone(afterQuietHours(settings), effectiveTimezone(settings))} 起恢复`
+      ? `进入${label}，暂停全部定时任务，${formatInZone(afterQuietHours(settings), serverTimezone())} 起恢复`
       : `${label}结束，定时任务恢复`);
     return true;
   }

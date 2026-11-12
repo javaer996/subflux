@@ -73,6 +73,8 @@ services:
       SUBFLUX_PASSWORD: ${SUBFLUX_PASSWORD:-subflux}
       SUBFLUX_SESSION_SECRET: ${SUBFLUX_SESSION_SECRET:-}
       SUBFLUX_SECRET_KEY: ${SUBFLUX_SECRET_KEY:-}
+      # 容器时区，夜间模式按它计时段；留空为容器默认（UTC）
+      TZ: ${SUBFLUX_TZ:-}
     ports:
       - "${SUBFLUX_PORT:-8888}:8888"
     volumes:

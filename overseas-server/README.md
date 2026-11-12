@@ -99,9 +99,9 @@ npm install
 任务中心有一张「夜间模式」卡片，可以开关并设置开始 / 结束时间（例如 `23:00` → `07:00`，支持跨零点），改完立即生效、不用点保存。
 
 - **只停定时任务**：这段时间内订阅刷新、定时握手测速、定时推送都不会到点触发；手动刷新、手动测试、立即推送照常执行。
-- **时区**：时间按设置里的时区解释，留空则跟随服务器时区（卡片上会显示服务器时区，也会提示你浏览器所在的时区）。服务器跑在 UTC 容器里时建议显式填 `Asia/Shanghai`，否则「23:00」指的是 UTC 23:00。
+- **时区**：自动使用服务器所在时区，卡片上会显示当前是哪个时区（例如 `UTC`、`Asia/Shanghai`）。不需要手动填时区，也不跟随浏览器。想让「23:00」指北京时间：裸机部署给进程加环境变量 `TZ=Asia/Shanghai`，Docker 部署在 `.env` 里设 `SUBFLUX_TZ=Asia/Shanghai`（compose 会把它传给容器）。
 - **补跑**：夜间到期的任务不会被丢弃，夜间结束后下一个 tick 会立刻补跑一次，然后按原间隔排下一次。
-- **状态**：进入 / 离开夜间模式都会写一条事件；卡片和任务中心页头会显示「生效中」与预计恢复时间，`/api/state` 里对应 `quietHoursEnabled`、`quietHoursStart`、`quietHoursEnd`、`quietHoursTz`、`quietActive`、`quietUntilAt`。
+- **状态**：进入 / 离开夜间模式都会写一条事件；卡片和任务中心页头会显示「生效中」与预计恢复时间，`/api/state` 里对应 `quietHoursEnabled`、`quietHoursStart`、`quietHoursEnd`、`quietActive`、`quietUntilAt`，以及 `meta.timezone`（服务器时区）。
 
 ## 站点解锁检测
 
@@ -192,7 +192,7 @@ lib/site-tester.js Mihomo 站点检测
 lib/china-tester.js 中国探针任务
 lib/pusher.js   定时推送（文件 / HTTP / OSS / S3）
 lib/scheduler.js 定时任务调度（30 秒 tick）
-lib/quiet-hours.js 夜间模式时段判断（按时区、支持跨零点）
+lib/quiet-hours.js 夜间模式时段判断（按服务器时区、支持跨零点）
 lib/store.js    JSON 持久化与迁移
 public/         前端
 ```

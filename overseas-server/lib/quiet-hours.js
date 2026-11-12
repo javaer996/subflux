@@ -1,7 +1,7 @@
 /**
  * 夜间模式（免打扰时段）：在这段时间里不自动触发定时任务。
  *
- * 时间区间按 `settings.quietHoursTz` 指定的时区解释（留空则用服务器本地时区），
+ * 时间区间按服务器所在时区解释（自动识别，不跟随浏览器），
  * 支持跨零点（例如 23:30 → 07:00）。只拦截「定时 / 自动」任务，
  * 手动刷新、手动测试、手动推送不受影响。
  */
@@ -22,26 +22,9 @@ export function normalizeClock(value, fallback = '') {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
-/** 校验时区名；无效返回 null。 */
-export function normalizeTimezone(value) {
-  const tz = String(value ?? '').trim();
-  if (!tz) return '';
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return tz;
-  } catch {
-    return null;
-  }
-}
-
 /** 服务器本机时区名。 */
 export function serverTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-}
-
-/** 夜间模式实际使用的时区：设置里指定的，否则服务器本机。 */
-export function effectiveTimezone(settings = {}) {
-  return normalizeTimezone(settings.quietHoursTz) || serverTimezone();
 }
 
 /** 从设置对象里取出规整后的夜间模式配置。 */
@@ -50,7 +33,7 @@ export function quietHoursConfig(settings = {}) {
     enabled: settings.quietHoursEnabled === true,
     start: normalizeClock(settings.quietHoursStart, '23:00'),
     end: normalizeClock(settings.quietHoursEnd, '07:00'),
-    timezone: effectiveTimezone(settings),
+    timezone: serverTimezone(),
   };
 }
 

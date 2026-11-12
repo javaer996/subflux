@@ -2640,12 +2640,12 @@ function taskCard(title, icon, job, queue, kind) {
 
 const CLOCK_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-/** 夜间区间按「设置里选的时区」解释；留空则用服务器时区。 */
-function quietTimezone(s) {
-  return s?.quietHoursTz || App.state?.meta?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+/** 服务器时区（由后端 meta 提供，夜间区间始终按它解释）。 */
+function quietTimezone() {
+  return App.state?.meta?.timezone || 'UTC';
 }
 
-/** 目标时区里当前的分钟数（0–1439）。 */
+/** 服务器时区里当前的分钟数（0–1439）。 */
 function quietMinutesNow(timeZone) {
   try {
     const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour12: false, hour: '2-digit', minute: '2-digit' }).formatToParts(new Date());
@@ -2666,20 +2666,29 @@ function quietHoursActive(s) {
   const a = Number(from[1]) * 60 + Number(from[2]);
   const b = Number(to[1]) * 60 + Number(to[2]);
   if (a === b) return false;
-  const m = quietMinutesNow(quietTimezone(s));
+  const m = quietMinutesNow(quietTimezone());
   return a < b ? m >= a && m < b : m >= a || m < b;
 }
 
-/** 把夜间恢复时间按所选时区显示出来。 */
+/** 把恢复时间按服务器时区显示出来；服务器还没算出来时就按结束时间自己推一个。 */
 function quietUntilText(s) {
-  if (!s?.quietUntilAt) return '';
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      timeZone: quietTimezone(s), hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-    }).format(new Date(s.quietUntilAt));
-  } catch {
-    return fmtTime(s.quietUntilAt);
+  if (s?.quietUntilAt) {
+    try {
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: quietTimezone(), hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      }).format(new Date(s.quietUntilAt));
+    } catch {
+      return fmtTime(s.quietUntilAt);
+    }
   }
+  const to = CLOCK_RE.exec(String(s?.quietHoursEnd || '').trim());
+  if (!to) return '';
+  const minutes = Number(to[1]) * 60 + Number(to[2]);
+  const now = quietMinutesNow(quietTimezone());
+  const dayOffset = minutes > now ? 0 : 1;
+  const at = new Date(Date.now() + dayOffset * 86400000);
+  const day = `${String(at.getMonth() + 1).padStart(2, '0')}/${String(at.getDate()).padStart(2, '0')}`;
+  return `${day} ${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
 function quietHoursHint(s) {
@@ -2692,30 +2701,22 @@ function quietHoursHint(s) {
   return `当前不在夜间模式，定时任务正常执行；下次 ${esc(s.quietHoursStart)} 开始暂停。`;
 }
 
-/** 夜间模式即时保存：改开关、时间或时区后直接写库，不需要再点保存设置。 */
+/** 夜间模式即时保存：改开关或时间后直接写库，不需要再点保存设置。 */
 let quietSaving = false;
 async function saveQuietHours() {
   if (quietSaving) return;
   const enabled = $('#quiet-enabled')?.checked === true;
   const start = $('#setting-quiet-start')?.value || '23:00';
   const end = $('#setting-quiet-end')?.value || '07:00';
-  let tz = $('#setting-quiet-tz')?.value ?? '';
-  let tzNote = '';
-  // 打开夜间模式但没填时区、而浏览器与服务器不在同一个时区时，直接按你所在时区写进去，
-  // 免得「23:00」被理解成服务器时区（UTC 容器很常见）。
-  if (enabled && !tz && quietBrowserZone() && quietBrowserZone() !== quietServerZone()) {
-    tz = quietBrowserZone();
-    tzNote = `，时区按你所在的 ${tz} 计算`;
-  }
   quietSaving = true;
   try {
     await api('/api/settings', {
       method: 'PUT',
-      body: JSON.stringify({ quietHoursEnabled: enabled, quietHoursStart: start, quietHoursEnd: end, quietHoursTz: tz }),
+      body: JSON.stringify({ quietHoursEnabled: enabled, quietHoursStart: start, quietHoursEnd: end }),
     });
     await refreshState(false);
     render({ quiet: true });
-    toast(enabled ? `夜间模式已开启：${start}–${end} 期间暂停定时任务${tzNote}` : '夜间模式已关闭', 'success');
+    toast(enabled ? `夜间模式已开启：${start}–${end} 期间暂停定时任务` : '夜间模式已关闭', 'success');
   } catch (err) {
     toast(err.message, 'error', 6000);
     await refreshState(false).catch(() => {});
@@ -2725,21 +2726,15 @@ async function saveQuietHours() {
   }
 }
 
-/** 服务器时区（来自 /api/state 的 meta）。 */
-function quietServerZone() {
-  return App.state?.meta?.timezone || 'UTC';
-}
-
-/** 浏览器时区。 */
-function quietBrowserZone() {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
-}
-
-/** 时区下拉建议：浏览器时区 + 服务器时区 + 常见时区，去重后按字母排序。 */
-function quietZoneOptions(current = '') {
-  const common = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Bangkok', 'Asia/Dubai', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
-  const all = [quietBrowserZone(), quietServerZone(), current, ...common].filter(Boolean);
-  return [...new Set(all)].map((tz) => `<option value="${esc(tz)}"></option>`).join('');
+/** 服务器时区里当前的「HH:MM」。 */
+function quietNowText() {
+  const tz = quietTimezone();
+  try {
+    return new Intl.DateTimeFormat('zh-CN', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' }).format(new Date());
+  } catch {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
 }
 
 function renderTasks() {
@@ -2793,10 +2788,7 @@ function renderTasks() {
             <input class="input" id="setting-quiet-end" data-quiet-field="quietHoursEnd" type="time" value="${esc(s.quietHoursEnd || '07:00')}">
           </div>
           <div class="field span-2">
-            <label for="setting-quiet-tz">时区</label>
-            <input class="input" id="setting-quiet-tz" data-quiet-field="quietHoursTz" list="quiet-tz-list" autocomplete="off" value="${esc(s.quietHoursTz || '')}" placeholder="留空跟随服务器（${esc(quietServerZone())}）">
-            <datalist id="quiet-tz-list">${quietZoneOptions(s.quietHoursTz)}</datalist>
-            <div class="field-hint">开始与结束时间按这个时区解释，支持跨零点（例如 23:00 → 07:00）。服务器时区是 ${esc(quietServerZone())}，你的浏览器是 ${esc(quietBrowserZone())}，输入框里可直接输入时区名筛选。</div>
+            <div class="field-hint">时间按服务器时区解释：<code>${esc(quietTimezone())}</code>。支持跨零点（例如 23:00 → 07:00）。当前时间 ${esc(quietNowText())}。</div>
           </div>
         </div>
         <div class="field-hint" id="quiet-hint" style="margin-top:10px">${quietHoursHint(s)}</div>

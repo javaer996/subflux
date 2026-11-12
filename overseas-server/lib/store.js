@@ -5,7 +5,7 @@ import { uid, clamp, cleanText } from './util.js';
 import { DEFAULT_SITES, normalizeSites } from './sites.js';
 import { DEFAULT_ROUTING, normalizeRouting, normalizeRuleList, parseCustomRules } from './routing.js';
 import { initSecrets, encryptState, decryptState, hasPlaintextSecrets } from './secrets.js';
-import { normalizeClock, normalizeTimezone } from './quiet-hours.js';
+import { normalizeClock } from './quiet-hours.js';
 
 export const DEFAULT_SETTINGS = {
   testUrl: 'https://www.gstatic.com/generate_204',
@@ -33,7 +33,6 @@ export const DEFAULT_SETTINGS = {
   quietHoursEnabled: false,
   quietHoursStart: '23:00',
   quietHoursEnd: '07:00',
-  quietHoursTz: '',
   tcpConcurrency: 16,
   fetchProxy: '',
   chinaProbeUrl: '',
@@ -195,7 +194,8 @@ export class Store extends EventEmitter {
     state.settings.quietHoursEnabled = data.settings?.quietHoursEnabled === true;
     state.settings.quietHoursStart = normalizeClock(data.settings?.quietHoursStart, DEFAULT_SETTINGS.quietHoursStart);
     state.settings.quietHoursEnd = normalizeClock(data.settings?.quietHoursEnd, DEFAULT_SETTINGS.quietHoursEnd);
-    state.settings.quietHoursTz = normalizeTimezone(data.settings?.quietHoursTz) || '';
+    // 时区固定跟随服务器，旧版本遗留的自定义时区字段直接清掉。
+    delete state.settings.quietHoursTz;
     // Repair profile filter/group shapes from older snapshots.
     state.profiles = state.profiles.map((p) => {
       const profile = {
