@@ -138,15 +138,36 @@ function fmtNum(value) {
   return new Intl.NumberFormat('zh-CN').format(Number(value) || 0);
 }
 
+/** 全站时区：始终跟后端（服务器时区或时区环境变量）一致，不用浏览器时区。 */
+function siteTimezone() {
+  return App.state?.meta?.timezone || 'UTC';
+}
+
+/** 某个时刻在站点时区里的「YYYY-MM-DD」，用于判断是不是同一天。 */
+function zoneDayKey(date) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: siteTimezone(), year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(date);
+    const get = (t) => parts.find((p) => p.type === t)?.value || '';
+    return `${get('year')}-${get('month')}-${get('day')}`;
+  } catch {
+    return '';
+  }
+}
+
 function fmtTime(iso, fallback = '—') {
   if (!iso) return fallback;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fallback;
-  const now = new Date();
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  return new Intl.DateTimeFormat('zh-CN', sameDay
-    ? { hour: '2-digit', minute: '2-digit', hour12: false }
-    : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  const sameDay = zoneDayKey(d) === zoneDayKey(new Date());
+  try {
+    return new Intl.DateTimeFormat('zh-CN', sameDay
+      ? { timeZone: siteTimezone(), hour: '2-digit', minute: '2-digit', hour12: false }
+      : { timeZone: siteTimezone(), month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  } catch {
+    return String(iso);
+  }
 }
 
 function relTime(iso, fallback = '从未') {
@@ -2640,13 +2661,8 @@ function taskCard(title, icon, job, queue, kind) {
 
 const CLOCK_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-/** 服务器时区（由后端 meta 提供，夜间区间始终按它解释）。 */
-function quietTimezone() {
-  return App.state?.meta?.timezone || 'UTC';
-}
-
-/** 服务器时区里当前的分钟数（0–1439）。 */
-function quietMinutesNow(timeZone) {
+/** 站点时区里当前的分钟数（0–1439），与后端同一套规则。 */
+function quietMinutesNow(timeZone = siteTimezone()) {
   try {
     const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour12: false, hour: '2-digit', minute: '2-digit' }).formatToParts(new Date());
     const get = (t) => Number(parts.find((p) => p.type === t)?.value || 0);
@@ -2666,28 +2682,18 @@ function quietHoursActive(s) {
   const a = Number(from[1]) * 60 + Number(from[2]);
   const b = Number(to[1]) * 60 + Number(to[2]);
   if (a === b) return false;
-  const m = quietMinutesNow(quietTimezone());
+  const m = quietMinutesNow();
   return a < b ? m >= a && m < b : m >= a || m < b;
 }
 
-/** 把恢复时间按服务器时区显示出来；服务器还没算出来时就按结束时间自己推一个。 */
+/** 把恢复时间按站点时区显示出来；服务器还没算出来时就按结束时间自己推一个。 */
 function quietUntilText(s) {
-  if (s?.quietUntilAt) {
-    try {
-      return new Intl.DateTimeFormat('zh-CN', {
-        timeZone: quietTimezone(), hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-      }).format(new Date(s.quietUntilAt));
-    } catch {
-      return fmtTime(s.quietUntilAt);
-    }
-  }
+  if (s?.quietUntilAt) return fmtTime(s.quietUntilAt);
   const to = CLOCK_RE.exec(String(s?.quietHoursEnd || '').trim());
   if (!to) return '';
   const minutes = Number(to[1]) * 60 + Number(to[2]);
-  const now = quietMinutesNow(quietTimezone());
-  const dayOffset = minutes > now ? 0 : 1;
-  const at = new Date(Date.now() + dayOffset * 86400000);
-  const day = `${String(at.getMonth() + 1).padStart(2, '0')}/${String(at.getDate()).padStart(2, '0')}`;
+  const dayOffset = minutes > quietMinutesNow() ? 0 : 1;
+  const day = zoneDayKey(new Date(Date.now() + dayOffset * 86400000)).slice(5).replace('-', '/');
   return `${day} ${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
@@ -2726,15 +2732,9 @@ async function saveQuietHours() {
   }
 }
 
-/** 服务器时区里当前的「HH:MM」。 */
+/** 站点时区里当前的「HH:MM」。 */
 function quietNowText() {
-  const tz = quietTimezone();
-  try {
-    return new Intl.DateTimeFormat('zh-CN', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' }).format(new Date());
-  } catch {
-    const d = new Date();
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  }
+  return fmtTime(new Date().toISOString());
 }
 
 function renderTasks() {
@@ -2788,7 +2788,7 @@ function renderTasks() {
             <input class="input" id="setting-quiet-end" data-quiet-field="quietHoursEnd" type="time" value="${esc(s.quietHoursEnd || '07:00')}">
           </div>
           <div class="field span-2">
-            <div class="field-hint">时间按服务器时区解释：<code>${esc(quietTimezone())}</code>。支持跨零点（例如 23:00 → 07:00）。当前时间 ${esc(quietNowText())}。</div>
+            <div class="field-hint">时间按当前时区 <code>${esc(siteTimezone())}</code> 解释，支持跨零点（例如 23:00 → 07:00），当前时间 ${esc(quietNowText())}。</div>
           </div>
         </div>
         <div class="field-hint" id="quiet-hint" style="margin-top:10px">${quietHoursHint(s)}</div>
@@ -3572,7 +3572,7 @@ async function exportSources() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `subflux-sources-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `subflux-sources-${zoneDayKey(new Date())}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();

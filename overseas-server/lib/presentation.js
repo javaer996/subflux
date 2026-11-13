@@ -4,6 +4,7 @@ import { summarizeSites } from './sites.js';
 import { sourceBlockedReason, trafficInfo } from './traffic.js';
 import { certFilterPass } from './tls.js';
 import { formatBytes, IP_TYPE_LABELS, safeInt } from './util.js';
+import { serverTimezone } from './timezone.js';
 
 export function serializeSource(source, settings, nodes = []) {
   const traffic = trafficInfo(source);
@@ -292,7 +293,7 @@ export function buildState(store, tester, siteTester, chinaTester, startedAt, si
         latency: tester.pendingAuto?.size || 0,
         site: siteTester?.pendingAuto?.size || 0,
       },
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      timezone: serverTimezone(),
       startedAt,
       uptimeSec: Math.round(process.uptime()),
       memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),

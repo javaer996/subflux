@@ -15,6 +15,7 @@ import {
 import { GROUP_NAMES } from './constants.js';
 import { siteTags, nodeSiteState } from './sites.js';
 import { buildClashRules, buildSingboxRoute, routingSummary } from './routing.js';
+import { formatInZone } from './timezone.js';
 
 const RESERVED_NAMES = new Set([
   ...Object.values(GROUP_NAMES), 'DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'GLOBAL', 'COMPATIBLE',
@@ -342,7 +343,7 @@ export function buildClash(profile, matched, state) {
   };
   const header = [
     '# SubFlux 订阅配置',
-    `# 节点 ${nodes.length} 个 · ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`,
+    `# 节点 ${nodes.length} 个 · ${formatInZone(Date.now())}`,
     `# 测试地址 ${opts.url}`,
     `# 分流规则 ${route.rules.length} 条 · 自定义 ${route.customCount} 条`,
     '',

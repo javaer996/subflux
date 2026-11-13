@@ -19,6 +19,7 @@ import { CN_DIRECT_COUNT } from './lib/cn-direct.js';
 import { describeEngine } from './lib/engine.js';
 import { Auth } from './lib/auth.js';
 import { initLogger } from './lib/logger.js';
+import { initTimezone, serverTimezone, zoneParts } from './lib/timezone.js';
 import { refreshSource, isRefreshing, testFetchProxy, nextRunAt } from './lib/refresher.js';
 import { pushProfile } from './lib/pusher.js';
 import { buildOutput, normalizeFormat, profileSummary } from './lib/generator.js';
@@ -34,6 +35,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const STARTED_AT = new Date().toISOString();
 const STARTED_MS = Date.now();
 const BODY_LIMIT = 12 * 1024 * 1024;
+// 时区必须在日志与任何时间格式化之前定下来：默认服务器时区，配了 SUBFLUX_TZ/TZ 就切过去。
+initTimezone();
 initLogger(DATA_DIR);
 
 async function assetsUpdatedAfterStart() {
@@ -71,7 +74,8 @@ const MIME = {
 function logRequest(req, status, started) {
   const pathname = (req.url || '/').split('?')[0].replace(/^\/sub\/[^/]+/, '/sub/***');
   const ms = Date.now() - started;
-  console.log(`${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${req.socket.remoteAddress || '-'} ${req.method} ${pathname} ${status} ${ms}ms`);
+  const clock = zoneParts(Date.now());
+  console.log(`${clock.hour}:${clock.minute}:${clock.second} ${req.socket.remoteAddress || '-'} ${req.method} ${pathname} ${status} ${ms}ms`);
 }
 
 function sendJson(res, status, payload) {
@@ -1226,6 +1230,7 @@ server.listen(PORT, HOST, () => {
   console.log('  SubFlux · 订阅汇聚');
   console.log(`  http://${HOST}:${PORT}`);
   console.log(`  数据目录 ${DATA_DIR}`);
+  console.log(`  时区 ${serverTimezone()}${process.env.SUBFLUX_TZ ? "（来自 SUBFLUX_TZ）" : process.env.TZ ? "（来自 TZ）" : "（服务器默认）"}`);
   console.log(`  订阅源 ${store.state.sources.length} · 节点 ${store.state.nodes.length} · 输出订阅 ${store.state.profiles.length}`);
   console.log('');
 });

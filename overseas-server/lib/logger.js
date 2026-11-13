@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import util from 'node:util';
+import { localDayKey, logStamp } from './timezone.js';
 
 /**
  * 文件日志：按天写入 DATA_DIR/logs/app-YYYY-MM-DD.log，
@@ -24,8 +25,9 @@ const originals = {
   debug: console.debug.bind(console),
 };
 
-function dayKey(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+// 日志按「当前时区」（服务器时区或被时区环境变量覆盖的时区）分天，跨天边界才符合直觉。
+function dayKey(ms = Date.now()) {
+  return localDayKey(ms);
 }
 
 function formatArgs(args) {
@@ -69,7 +71,7 @@ function prune() {
 }
 
 function write(level, args) {
-  const line = `${new Date().toISOString()} ${level.toUpperCase()} ${formatArgs(args)}`;
+  const line = `${logStamp()} ${level.toUpperCase()} ${formatArgs(args)}`;
   try {
     const day = dayKey();
     if (!stream || day !== currentDay) openStream(day);

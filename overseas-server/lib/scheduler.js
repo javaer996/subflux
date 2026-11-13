@@ -1,6 +1,7 @@
 import { refreshSource, isRefreshing } from './refresher.js';
 import { pushProfile, nextPushAt } from './pusher.js';
-import { inQuietHours, quietHoursLabel, afterQuietHours, serverTimezone, formatInZone } from './quiet-hours.js';
+import { inQuietHours, quietHoursLabel, afterQuietHours } from './quiet-hours.js';
+import { serverTimezone, formatInZone } from './timezone.js';
 
 export class Scheduler {
   constructor(store, tester, siteTester) {

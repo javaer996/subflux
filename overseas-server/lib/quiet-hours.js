@@ -1,10 +1,12 @@
 /**
  * 夜间模式（免打扰时段）：在这段时间里不自动触发定时任务。
  *
- * 时间区间按服务器所在时区解释（自动识别，不跟随浏览器），
+ * 时间区间按全站时区（服务器时区，或被时区环境变量覆盖后的时区）解释，
  * 支持跨零点（例如 23:30 → 07:00）。只拦截「定时 / 自动」任务，
  * 手动刷新、手动测试、手动推送不受影响。
  */
+
+import { serverTimezone, zoneParts, zoneOffsetMinutes } from './timezone.js';
 
 const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
@@ -22,11 +24,6 @@ export function normalizeClock(value, fallback = '') {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
-/** 服务器本机时区名。 */
-export function serverTimezone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-}
-
 /** 从设置对象里取出规整后的夜间模式配置。 */
 export function quietHoursConfig(settings = {}) {
   return {
@@ -37,28 +34,10 @@ export function quietHoursConfig(settings = {}) {
   };
 }
 
-const formatters = new Map();
-function clockFormatter(timeZone) {
-  let f = formatters.get(timeZone);
-  if (!f) {
-    f = new Intl.DateTimeFormat('en-GB', {
-      timeZone,
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      weekday: 'short',
-    });
-    formatters.set(timeZone, f);
-  }
-  return f;
-}
-
 /** 指定时刻在目标时区里的分钟数（0–1439）。 */
-export function minutesOfDay(nowMs, timeZone) {
-  const parts = clockFormatter(timeZone).formatToParts(new Date(nowMs));
-  const get = (type) => parts.find((p) => p.type === type)?.value || '0';
-  const hour = Number(get('hour')) % 24;
-  return hour * 60 + Number(get('minute'));
+export function minutesOfDay(nowMs, timeZone = serverTimezone()) {
+  const p = zoneParts(nowMs, timeZone);
+  return (Number(p.hour) % 24) * 60 + Number(p.minute);
 }
 
 function inRange(minutes, from, to) {
@@ -94,32 +73,11 @@ export function afterQuietHours(settings = {}, nowMs = Date.now()) {
   const to = parseClock(end);
   // 先按「目标时区相对 UTC 的偏移」直接算出今天的结束时刻，再校验一次；
   // 遇到夏令时或跨日误差时向后逐分钟微调（通常 0 次）。
-  const localMinutes = minutesOfDay(nowMs, timezone);
-  const utcMinutes = new Date(nowMs).getUTCHours() * 60 + new Date(nowMs).getUTCMinutes();
-  let offset = localMinutes - utcMinutes;
-  if (offset > 720) offset -= 1440;
-  else if (offset < -720) offset += 1440;
+  const offset = zoneOffsetMinutes(nowMs, timezone);
   const localMidnightUtc = Math.floor((nowMs + offset * 60000) / 86400000) * 86400000 - offset * 60000;
   let at = localMidnightUtc + to * 60000;
   if (at <= nowMs) at += 86400000;
   at = Math.ceil(at / 60000) * 60000;
   for (let i = 0; i < 120 && inQuietHours(settings, at); i += 1) at += 60000;
   return at;
-}
-
-/** 把时间戳按指定时区格式化成「2026-11-12 23:00」。 */
-export function formatInZone(ms, timeZone = serverTimezone()) {
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      timeZone,
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(ms));
-  } catch {
-    return new Date(ms).toLocaleString('zh-CN', { hour12: false });
-  }
 }
