@@ -2668,8 +2668,9 @@ function quietMinutesNow(timeZone = siteTimezone()) {
     const get = (t) => Number(parts.find((p) => p.type === t)?.value || 0);
     return (get('hour') % 24) * 60 + get('minute');
   } catch {
+    // Intl 不可用时退回 UTC，绝不用浏览器时区（否则和站点时区对不上）。
     const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
+    return now.getUTCHours() * 60 + now.getUTCMinutes();
   }
 }
 
